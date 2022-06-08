@@ -1,0 +1,9 @@
+[workspace]
+
+members = [
+    "kvarko-cli",
+    "kvarko-engine",
+    "kvarko-model",
+    "kvarko-proc-macro",
+    "kvarko-view"
+]
