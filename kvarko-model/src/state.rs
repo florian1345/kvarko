@@ -137,16 +137,6 @@ impl Position {
         }
     }
 
-    fn dummy() -> Position {
-        Position {
-            board: Board::empty(),
-            short_castles: [false, false],
-            long_castles: [false, false],
-            en_passant_file: 0,
-            turn: Player::White
-        }
-    }
-
     fn from_fen_parts(board_fen: &str, turn_fen: &str,
             castling_rights_fen: &str, en_passant_fen: &str)
             -> FenResult<Position> {
@@ -333,7 +323,8 @@ impl Position {
 pub struct State {
     position: Position,
     history: Vec<Position>,
-    last_irreversible: usize
+    last_irreversible: usize,
+    fifty_move_clock: usize
 }
 
 impl State {
@@ -348,10 +339,46 @@ impl State {
         State {
             position: Position::initial(),
             history: Vec::new(),
-            last_irreversible: 0
+            last_irreversible: 0,
+            fifty_move_clock: 0
         }
     }
 
+    /// Parses a FEN string representing an entire state. The string must
+    /// contain six components, separated by spaces: the [Board], player to
+    /// move (`w`/`b`), castling rights (a list of `k`, `q`, `K`, `Q` where
+    /// case decides which player may still castle and `k`/`q` indicates
+    /// kingside/queenside respectively; `-` if no castles are allowed
+    /// anymore), en passant target square (in algebraic notation; `-` if no en
+    /// passant is available), half move clock (counting the half moves since
+    /// the last pawn move or capture), and full move clock (stating the
+    /// current 1-based move index).
+    ///
+    /// # Arguments
+    ///
+    /// * `fen`: A complete FEN string.
+    ///
+    /// # Returns
+    ///
+    /// A new state constructed from the given FEN.
+    ///
+    /// # Errors
+    ///
+    /// Any [FenError].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// // The initial game state. Board is in the initial configuration, "w"
+    /// // indicates white to move, "KQkq" means both white and black can still
+    /// // castle both kingside and queenside, en passant target is "-" as no
+    /// // en passant is available, half move clock is 0 and full move clock is
+    /// // 1.
+    ///
+    /// let initial_state = State::from_fen(
+    ///     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+    ///     .unwrap();
+    /// ```
     pub fn from_fen(fen: &str) -> FenResult<State> {
         let mut parts = fen.split(' ');
         let pos_parts = (0..4)
@@ -391,15 +418,11 @@ impl State {
             });
         }
 
-        let history = (0..max_half_move_clock)
-            .map(|_| Position::dummy())
-            .collect::<Vec<_>>();
-        let last_irreversible = history.len() - half_move_clock;
-
         Ok(State {
             position,
-            history,
-            last_irreversible
+            history: Vec::new(),
+            last_irreversible: 0,
+            fifty_move_clock: half_move_clock
         })
     }
 
@@ -426,14 +449,41 @@ impl State {
         &self.history
     }
 
+    /// Gets a slice containing all previous positions since the last
+    /// irreversible move, that is, a pawn move, a capture, or castling. The
+    /// position directly after the move is the first in the slice.
+    ///
+    /// # Returns
+    ///
+    /// A slice containing all previous positions since the last irreversible
+    /// move.
     pub fn reversible_history(&self) -> &[Position] {
         &self.history[self.last_irreversible..]
     }
 
+    /// Gets the current state of the fifty move clock, which counts the number
+    /// of consecutive half moves that have not made progress in terms of the
+    /// fifty move rule, i.e. which were not captures or pawn moves. If this
+    /// number reaches [rules::DRAW_NO_PROGRESS_COUNT], the game ends in a
+    /// draw.
+    ///
+    /// # Returns
+    ///
+    /// The current state of the fifty move clock.
+    pub fn fifty_move_clock(&self) -> usize {
+        self.fifty_move_clock
+    }
+
+    /// Converts the current state into a FEN string in the format defined in
+    /// [State::from_fen].
+    ///
+    /// # Returns
+    ///
+    /// A new string containing the FEN for this state.
     pub fn to_fen(&self) -> String {
         let mut fen = self.position.to_fen();
 
-        let half_move_clock = self.history.len() - self.last_irreversible;
+        let half_move_clock = self.fifty_move_clock;
         let full_move_clock = self.history.len() / 2 + 1;
 
         fen.push(' ');
