@@ -14,6 +14,10 @@ use std::ops::{
     BitXor,
     BitXorAssign,
     Not,
+    Shl,
+    ShlAssign,
+    Shr,
+    ShrAssign,
     Sub,
     SubAssign
 };
@@ -133,6 +137,46 @@ impl Not for Bitboard {
 
     fn not(self) -> Bitboard {
         Bitboard(!self.0)
+    }
+}
+
+impl<T> Shl<T> for Bitboard
+where
+    u64: Shl<T, Output = u64>
+{
+    type Output = Bitboard;
+
+    fn shl(self, rhs: T) -> Bitboard {
+        Bitboard(self.0 << rhs)
+    }
+}
+
+impl<T> ShlAssign<T> for Bitboard
+where
+    u64: ShlAssign<T>
+{
+    fn shl_assign(&mut self, rhs: T) {
+        self.0 <<= rhs;
+    }
+}
+
+impl<T> Shr<T> for Bitboard
+where
+    u64: Shr<T, Output = u64>
+{
+    type Output = Bitboard;
+
+    fn shr(self, rhs: T) -> Bitboard {
+        Bitboard(self.0 >> rhs)
+    }
+}
+
+impl<T> ShrAssign<T> for Bitboard
+where
+    u64: ShrAssign<T>
+{
+    fn shr_assign(&mut self, rhs: T) {
+        self.0 >>= rhs;
     }
 }
 

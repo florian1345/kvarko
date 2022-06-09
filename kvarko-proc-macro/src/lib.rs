@@ -1,6 +1,7 @@
 use proc_macro::TokenStream;
 
 use proc_macro2::Span;
+use quote::ToTokens;
 use serde::Deserialize;
 
 use std::fs::File;
@@ -451,4 +452,73 @@ pub fn load_magics(input: TokenStream) -> TokenStream {
             quote::quote_spanned!(span => compile_error! { #message }).into()
         }
     }
+}
+
+fn compute_hopper_attack(file: isize, rank: isize, deltas: &[(isize, isize)])
+        -> u64 {
+    let mut bitboard = 0;
+
+    for &(drank, dfile) in deltas {
+        let dest_file = (file + dfile) as usize;
+        let dest_rank = (rank + drank) as usize;
+
+        if dest_file < 8 && dest_rank < 8 {
+            bitboard |= 1 << (dest_rank * 8 + dest_file);
+        }
+    }
+
+    bitboard
+}
+
+fn hopper_attacks(deltas: &[(isize, isize)]) -> TokenStream {
+    let mut array = empty_array();
+
+    for rank in 0..8 {
+        for file in 0..8 {
+            let bitboard = compute_hopper_attack(file, rank, deltas);
+            array.elems.push(bitboard_lit(bitboard));
+        }
+    }
+
+    array.into_token_stream().into()
+}
+
+const KNIGHT_DELTAS: [(isize, isize); 8] = [
+    (-2, -1),
+    (-1, -2),
+    (1, -2),
+    (2, -1),
+    (2, 1),
+    (1, 2),
+    (-1, 2),
+    (-2, 1)
+];
+
+const KING_DELTAS: [(isize, isize); 8] = [
+    (-1, 0),
+    (-1, -1),
+    (0, -1),
+    (1, -1),
+    (1, 0),
+    (1, 1),
+    (0, 1),
+    (-1, 1)
+];
+
+/// Generates an array literal whose `n`-th entry is a `Bitboard` which
+/// contains the squares that a knight in position `n` could attack. The macro
+/// requires a `Bitboard` type which can be instantiated by `Bitboard(u64)` to
+/// be in scope.
+#[proc_macro]
+pub fn knight_attacks(_: TokenStream) -> TokenStream {
+    hopper_attacks(&KNIGHT_DELTAS)
+}
+
+/// Generates an array literal whose `n`-th entry is a `Bitboard` which
+/// contains the squares that a king in position `n` could attack. The macro
+/// requires a `Bitboard` type which can be instantiated by `Bitboard(u64)` to
+/// be in scope.
+#[proc_macro]
+pub fn king_attacks(_: TokenStream) -> TokenStream {
+    hopper_attacks(&KING_DELTAS)
 }
