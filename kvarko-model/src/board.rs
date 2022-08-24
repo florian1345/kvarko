@@ -29,6 +29,16 @@ pub struct Location(pub(crate) usize);
 
 impl Location {
 
+    /// Gets the 0-based index of the file (column) in which this square lies.
+    pub fn file(self) -> usize {
+        self.0 % BOARD_WIDTH
+    }
+
+    /// Gets the 0-based index of the rank (row) on which this square lies.
+    pub fn rank(self) -> usize {
+        self.0 / BOARD_WIDTH
+    }
+
     /// Creates a new location that represents the square in the given file and
     /// rank.
     ///

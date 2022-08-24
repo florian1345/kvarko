@@ -2,9 +2,9 @@
 //! can make in a given position. It also contains a move generation algorithm
 //! accessible through the function [list_moves].
 
-use crate::board::{Bitboard, BOARD_WIDTH, Location, Board};
+use crate::board::{Bitboard, Location, Board};
 use crate::piece::Piece;
-use crate::player::Player;
+use crate::player::{Black, CastleInfo, Player, StaticPlayer, White};
 use crate::rules::PROMOTABLE;
 use crate::state::Position;
 
@@ -18,89 +18,6 @@ const LEFT_FILE: Bitboard = Bitboard(0x0101010101010101);
 const RIGHT_FILE: Bitboard = Bitboard(0x8080808080808080);
 const WHITE_EN_PASSANT_TARGET_RANK: usize = 5;
 const BLACK_EN_PASSANT_TARGET_RANK: usize = 2;
-
-struct CastleInfo {
-    intermediate: Bitboard,
-    passed: Bitboard,
-    king_delta_mask: Bitboard,
-    rook_delta_mask: Bitboard
-}
-
-trait StaticPlayer {
-
-    const FOURTH_ROW: Bitboard;
-    const FIFTH_ROW: Bitboard;
-    const EIGHTH_ROW: Bitboard;
-
-    const SHORT_CASTLE_INFO: CastleInfo;
-    const LONG_CASTLE_INFO: CastleInfo;
-
-    fn forward(bitboard: Bitboard) -> Bitboard;
-
-    fn back(bitboard: Bitboard) -> Bitboard;
-}
-
-struct White;
-
-impl StaticPlayer for White {
-
-    const FOURTH_ROW: Bitboard = Bitboard(0x00000000ff000000);
-    const FIFTH_ROW: Bitboard = Bitboard(0x000000ff00000000);
-    const EIGHTH_ROW: Bitboard = Bitboard(0xff00000000000000);
-
-    const SHORT_CASTLE_INFO: CastleInfo = CastleInfo {
-        intermediate: Bitboard(0x0000000000000060),
-        passed: Bitboard(0x0000000000000060),
-        king_delta_mask: Bitboard(0x0000000000000050),
-        rook_delta_mask: Bitboard(0x00000000000000a0)
-    };
-
-    const LONG_CASTLE_INFO: CastleInfo = CastleInfo {
-        intermediate: Bitboard(0x000000000000000e),
-        passed: Bitboard(0x000000000000000c),
-        king_delta_mask: Bitboard(0x0000000000000014),
-        rook_delta_mask: Bitboard(0x0000000000000009)
-    };
-
-    fn forward(bitboard: Bitboard) -> Bitboard {
-        bitboard << BOARD_WIDTH
-    }
-
-    fn back(bitboard: Bitboard) -> Bitboard {
-        bitboard >> BOARD_WIDTH
-    }
-}
-
-struct Black;
-
-impl StaticPlayer for Black {
-
-    const FOURTH_ROW: Bitboard = Bitboard(0x000000ff00000000);
-    const FIFTH_ROW: Bitboard = Bitboard(0x00000000ff000000);
-    const EIGHTH_ROW: Bitboard = Bitboard(0x00000000000000ff);
-
-    const SHORT_CASTLE_INFO: CastleInfo = CastleInfo {
-        intermediate: Bitboard(0x6000000000000000),
-        passed: Bitboard(0x6000000000000000),
-        king_delta_mask: Bitboard(0x5000000000000000),
-        rook_delta_mask: Bitboard(0xa000000000000000)
-    };
-
-    const LONG_CASTLE_INFO: CastleInfo = CastleInfo {
-        intermediate: Bitboard(0x0e00000000000000),
-        passed: Bitboard(0x0c00000000000000),
-        king_delta_mask: Bitboard(0x1400000000000000),
-        rook_delta_mask: Bitboard(0x0900000000000000)
-    };
-
-    fn forward(bitboard: Bitboard) -> Bitboard {
-        bitboard >> BOARD_WIDTH
-    }
-
-    fn back(bitboard: Bitboard) -> Bitboard {
-        bitboard << BOARD_WIDTH
-    }
-}
 
 fn get_slider_attack(occupancy: Bitboard, square: usize, magics: &[Magic; 64])
         -> Bitboard {
@@ -117,7 +34,7 @@ fn get_pawn_push<D: StaticPlayer>(occupancy: Bitboard,
         square_singleton: Bitboard) -> Bitboard {
     let free = !occupancy;
     let progress = D::forward(square_singleton) & free;
-    progress | D::forward(progress) & free & D::FOURTH_ROW
+    progress | D::forward(progress) & free & D::FOURTH_RANK
 }
 
 fn get_pawn_attack<D: StaticPlayer>(square_singleton: Bitboard) -> Bitboard {
@@ -513,7 +430,7 @@ fn generate_pawn_push_move_from_direction<D: StaticPlayer>(moves: &mut Vec<Move>
     let targets = get_pawn_push::<D>(occupancy, source_singleton);
     let targets = targets & mask;
 
-    if (targets & D::EIGHTH_ROW).is_empty() {
+    if (targets & D::EIGHTH_RANK).is_empty() {
         generate_moves_from_targets(
             moves, board, player, source_singleton, targets, Piece::Pawn);
     }
@@ -545,7 +462,7 @@ fn generate_pawn_capture_moves_from_direction<D: StaticPlayer>(
     let attack = get_pawn_attack::<D>(source_singleton);
     let capture_targets = attack & opponent_pieces & masks.capture_mask;
 
-    if (capture_targets & D::EIGHTH_ROW).is_empty() {
+    if (capture_targets & D::EIGHTH_RANK).is_empty() {
         generate_moves_from_targets(moves, board, player, source_singleton,
             capture_targets, Piece::Pawn);
     }
@@ -566,13 +483,13 @@ fn generate_pawn_capture_moves_from_direction<D: StaticPlayer>(
             let own_pieces = board.of_player(player);
             let own_king_singleton = board.of_kind(Piece::King) & own_pieces;
 
-            if !(own_king_singleton & D::FIFTH_ROW).is_empty() {
+            if !(own_king_singleton & D::FIFTH_RANK).is_empty() {
                 let opponent_orthogonal_sliders = (board.of_kind(Piece::Rook) |
                     board.of_kind(Piece::Queen)) & opponent_pieces;
                 let occupancy = (own_pieces | opponent_pieces) -
                     source_singleton - en_passant_captured;
 
-                if !(opponent_orthogonal_sliders & D::FIFTH_ROW).is_empty() {
+                if !(opponent_orthogonal_sliders & D::FIFTH_RANK).is_empty() {
                     for opponent_orthogonal_slider in
                             opponent_orthogonal_sliders.locations() {
                         let attack = get_rook_attack(occupancy,

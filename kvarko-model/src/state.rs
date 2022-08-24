@@ -1,11 +1,21 @@
 //! This module defines the [Position] and [State] structs, which manage
 //! information about the current game situation.
 
-use crate::board::Board;
+use crate::board::{Board, Bitboard};
 use crate::error::{FenError, FenResult};
+use crate::movement::Move;
 use crate::piece::Piece;
-use crate::player::{Player, PLAYER_COUNT, PLAYERS};
+use crate::player::{Black, Player, StaticPlayer, White, PLAYER_COUNT, PLAYERS};
 use crate::rules;
+
+/// Returned by [Position::make_move] to allow reverting the move with
+/// [Position::unmake_move].
+#[derive(Clone, Debug)]
+pub struct PositionRevertInfo {
+    short_castles: [bool; PLAYER_COUNT],
+    long_castles: [bool; PLAYER_COUNT],
+    en_passant_file: usize
+}
 
 /// All information about the state of the game that does not relate to the
 /// history of the game. That is, this contains the [Board], information
@@ -255,6 +265,109 @@ impl Position {
         self.turn
     }
 
+    fn apply_ordinary_move<P>(&mut self, moved: Piece, captured: Option<Piece>,
+        delta_mask: Bitboard)
+    where
+        P: StaticPlayer
+    {
+        if moved == Piece::Pawn && !(delta_mask & P::SECOND_RANK).is_empty() &&
+                !(delta_mask & P::FOURTH_RANK).is_empty() {
+            self.en_passant_file = delta_mask.min_unchecked().file();
+            return;
+        }
+        else {
+            self.en_passant_file = usize::MAX;
+        }
+
+        if moved == Piece::King {
+            self.short_castles[self.turn as usize] = false;
+            self.long_castles[self.turn as usize] = false;
+        }
+        else if moved == Piece::Rook {
+            if !(delta_mask & P::CLOSE_ROOK_SINGLETON).is_empty() {
+                self.short_castles[self.turn as usize] = false;
+            }
+
+            if !(delta_mask & P::FAR_ROOK_SINGLETON).is_empty() {
+                self.long_castles[self.turn as usize] = false;
+            }
+        }
+        else if captured == Some(Piece::Rook) {
+            let opponent = self.turn.opponent();
+
+            if !(delta_mask & P::Opponent::CLOSE_ROOK_SINGLETON).is_empty() {
+                self.short_castles[opponent as usize] = false;
+            }
+
+            if !(delta_mask & P::Opponent::FAR_ROOK_SINGLETON).is_empty() {
+                self.long_castles[opponent as usize] = false;
+            }
+        }
+    }
+
+    /// Applies the given move made by the given player to this position, that
+    /// is, moves/removes/promotes all necessary pieces on the underlying board
+    /// and updates metadata, such as castling states and the turn.
+    ///
+    /// # Arguments
+    ///
+    /// * `mov`: The [Move] to apply.
+    ///
+    /// # Returns
+    ///
+    /// A [PositionRevertInfo] to be passed to [Position::unmake_move] in case
+    /// the move should be reverted.
+    pub fn make_move(&mut self, mov: &Move) -> PositionRevertInfo {
+        let revert_info = PositionRevertInfo {
+            short_castles: self.short_castles.clone(),
+            long_castles: self.long_castles.clone(),
+            en_passant_file: self.en_passant_file
+        };
+
+        match mov {
+            &Move::Ordinary { moved, captured, delta_mask } => {
+                match self.turn {
+                    Player::White =>
+                        self.apply_ordinary_move::<White>(
+                            moved, captured, delta_mask),
+                    Player::Black =>
+                        self.apply_ordinary_move::<Black>(
+                            moved, captured, delta_mask)
+                }
+            },
+            &Move::Castle { .. } => {
+                self.short_castles[self.turn as usize] = false;
+                self.long_castles[self.turn as usize] = false;
+            },
+            _ => { }
+        }
+
+        self.board.make_move(self.turn, mov);
+        self.turn = self.turn.opponent();
+
+        revert_info
+    }
+
+    /// Reverts the given move made by the given player to this position, that
+    /// is, moves all pieces back, puts back captured pieces, and reverts
+    /// promotions. In addition, all metadata such as castling rights and the
+    /// turn is reverted. This restores the position after a call to
+    /// [Position::make_move] with the same move.
+    ///
+    /// # Arguments
+    ///
+    /// * `mov`: The [Move] to revert.
+    /// * `revert_info`: The [PositionRevertInfo] returned by the call to
+    /// [Position::make_move] to revert.
+    pub fn unmake_move(&mut self, mov: &Move,
+            revert_info: PositionRevertInfo) {
+        self.short_castles = revert_info.short_castles;
+        self.long_castles = revert_info.long_castles;
+        self.en_passant_file = revert_info.en_passant_file;
+        self.turn = self.turn.opponent();
+        self.board.unmake_move(self.turn, mov);
+    }
+
     /// Converts this position into FEN notation. To be precise, this only
     /// returns the part of the FEN notation which does not require knowledge
     /// about the history, as that is part of the [State] and not the position.
@@ -311,6 +424,15 @@ impl Position {
 
         fen
     }
+}
+
+/// Returned by [State::make_move] to allow reverting the move with
+/// [State::unmake_move].
+#[derive(Clone, Debug)]
+pub struct StateRevertInfo {
+    position_revert_info: PositionRevertInfo,
+    last_irreversible: usize,
+    fifty_move_clock: usize
 }
 
 /// The entire state of a match necessary to progress it. This tracks the
@@ -471,6 +593,73 @@ impl State {
         self.fifty_move_clock
     }
 
+    /// Applies the given move made by the given player to this state, that is,
+    /// moves/removes/promotes all necessary pieces on the underlying board,
+    /// updates metadata, such as castling states and the turn, and tracks the
+    /// history of moves for the fifty-move rule and three-fold-repetition
+    /// rule.
+    ///
+    /// # Arguments
+    ///
+    /// * `mov`: The [Move] to apply.
+    ///
+    /// # Returns
+    ///
+    /// A [StateRevertInfo] to be passed to [State::unmake_move] in case the
+    /// move should be reverted.
+    pub fn make_move(&mut self, mov: &Move) -> StateRevertInfo {
+        let index = self.history.len();
+        self.history.push(self.position.clone());
+
+        let position_revert_info = self.position.make_move(mov);
+        let revert_info = StateRevertInfo {
+            position_revert_info,
+            last_irreversible: self.last_irreversible,
+            fifty_move_clock: self.fifty_move_clock
+        };
+
+        match mov {
+            &Move::Ordinary { moved, captured, .. } => {
+                if moved == Piece::Pawn || captured.is_some() {
+                    self.last_irreversible = index;
+                    self.fifty_move_clock = 0;
+                }
+                else {
+                    self.fifty_move_clock += 1;
+                }
+            },
+            Move::EnPassant { .. } | Move::Promotion { .. } => {
+                self.last_irreversible = index;
+                self.fifty_move_clock = 0;
+            },
+            Move::Castle { .. } => {
+                self.last_irreversible = index;
+                self.fifty_move_clock += 1;
+            }
+        }
+
+        revert_info
+    }
+
+    /// Reverts the given move made by the given player to this state, that is,
+    /// moves all pieces back, puts back captured pieces, and reverts
+    /// promotions. In addition, all metadata such as castling rights and the
+    /// turn is reverted and the newest state is removed from the tracked
+    /// history. This restores the position after a call to [State::make_move]
+    /// with the same move.
+    ///
+    /// # Arguments
+    ///
+    /// * `mov`: The [Move] to revert.
+    /// * `revert_info`: The [StateRevertInfo] returned by the call to
+    /// [State::make_move] to revert.
+    pub fn unmake_move(&mut self, mov: &Move, revert_info: StateRevertInfo) {
+        self.history.pop();
+        self.last_irreversible = revert_info.last_irreversible;
+        self.fifty_move_clock = revert_info.fifty_move_clock;
+        self.position.unmake_move(mov, revert_info.position_revert_info);
+    }
+
     /// Converts the current state into a FEN string in the format defined in
     /// [State::from_fen].
     ///
@@ -489,5 +678,435 @@ impl State {
         fen.push_str(&full_move_clock.to_string());
 
         fen
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    const UNSET: usize = 1337;
+
+    fn test_move(fen: &str, mov: Move, assertions: impl Fn(&State)) {
+        let mut state = State::from_fen(fen).unwrap();
+        // make last_irreversible testable
+        state.last_irreversible = UNSET;
+        let state_clone = state.clone();
+        let revert_info = state.make_move(&mov);
+
+        assertions(&state);
+
+        state.unmake_move(&mov, revert_info);
+
+        assert_eq!(state_clone, state);
+    }
+
+    #[test]
+    fn normal_move() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │ r │ n │ b │ q │ k │ b │ n │ r │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ p │ p │ p │ p │ p │ p │ p │ p │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ P │ P │ P │ P │ P │ P │ P │ P │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ R │ N │ B │ Q │ K │ B │ N │ R │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // White moves the knight to c3.
+
+        let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+        let mov = Move::Ordinary {
+            moved: Piece::Knight,
+            captured: None,
+            delta_mask: Bitboard(0x0000000000040002)
+        };
+
+        test_move(fen, mov, |state| {
+            assert_eq!(Player::Black, state.position().turn());
+            assert_eq!(1, state.fifty_move_clock());
+            assert_eq!(UNSET, state.last_irreversible);
+        });
+    }
+
+    #[test]
+    fn pawn_move_resets_fifty_move_clock() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │ r │   │ b │ q │ k │   │   │ r │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ p │ p │ p │ p │   │ p │ p │ p │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ n │   │   │ n │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ b │   │ p │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ B │   │ P │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ N │   │   │ N │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ P │ P │ P │ P │   │ P │ P │ P │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ R │   │ B │ Q │ K │   │   │ R │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // White plays pawn to d3, resetting the fifty-move-clock.
+
+        let fen = "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2N2N2/PPPP1PPP/R1BQK2R \
+            w KQkq - 6 5";
+        let mov = Move::Ordinary {
+            moved: Piece::Pawn,
+            captured: None,
+            delta_mask: Bitboard(0x0000000000080800)
+        };
+
+        test_move(fen, mov, |state| {
+            assert_eq!(0, state.fifty_move_clock());
+            assert_eq!(0, state.last_irreversible);
+        });
+    }
+
+    #[test]
+    fn promotion_resets_fifty_move_clock() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ k │ P │ K │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // White plays pawn to d8 and promotes to a queen, resetting the
+        // fifty-move-clock.
+
+        let fen = "8/2kPK3/8/8/8/8/8/8 w - - 12 45";
+        let mov = Move::Promotion {
+            promotion: Piece::Queen,
+            captured: None,
+            delta_mask: Bitboard(0x0808000000000000)
+        };
+
+        test_move(fen, mov, |state| {
+            assert_eq!(0, state.fifty_move_clock());
+            assert_eq!(0, state.last_irreversible);
+        });
+    }
+
+    #[test]
+    fn capture_resets_fifty_move_clock() {
+        // Board (black to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │ r │   │ b │ q │ k │   │   │ r │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ p │ p │ p │   │   │ p │ p │ p │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ n │ p │   │ n │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ b │   │ p │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ B │   │ P │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ N │ P │ B │ N │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ P │ P │ P │   │   │ P │ P │ P │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ R │   │   │ Q │ K │   │   │ R │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // Black takes the bishop on e3, resetting the fifty-move-clock.
+
+        let fen = "r1bqk2r/ppp2ppp/2np1n2/2b1p3/2B1P3/2NPBN2/PPP2PPP/R2QK2R b \
+            KQkq - 1 8";
+        let mov = Move::Ordinary {
+            moved: Piece::Bishop,
+            captured: Some(Piece::Bishop),
+            delta_mask: Bitboard(0x0000000400100000)
+        };
+
+        test_move(fen, mov, |state| {
+            assert_eq!(0, state.fifty_move_clock());
+            assert_eq!(0, state.last_irreversible);
+        });
+    }
+
+    #[test]
+    fn castle_resets_reversible_history_but_not_fifty_move_clock() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │ r │   │ b │ q │ k │   │   │ r │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ p │ p │ p │ p │   │ p │ p │ p │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ n │   │   │ n │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ b │   │ p │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ B │   │ P │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ N │   │   │ N │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ P │ P │ P │ P │   │ P │ P │ P │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ R │   │ B │ Q │ K │   │   │ R │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // White castles short, resetting reversible history (used internally)
+        // but no the fifty-move-clock (which is a Chess rule that does not
+        // consider castling as an irreversible move).
+
+        let fen = "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2N2N2/PPPP1PPP/R1BQK2R \
+            w KQkq - 6 5";
+        let mov = Move::Castle {
+            king_delta_mask: Bitboard(0x0000000000000050),
+            rook_delta_mask: Bitboard(0x00000000000000a0)
+        };
+
+        test_move(fen, mov, |state| {
+            assert_eq!(7, state.fifty_move_clock());
+            assert_eq!(0, state.last_irreversible);
+        });
+    }
+
+    #[test]
+    fn castle_sets_castling_state() {
+        // Board (black to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │ r │   │ b │ q │ k │   │   │ r │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ p │ p │ p │ p │   │ p │ p │ p │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ n │   │   │ n │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ b │   │ p │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ B │   │ P │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ N │   │   │ N │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ P │ P │ P │ P │   │ P │ P │ P │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ R │   │ B │ Q │   │ R │ K │   │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // Black castles short and is therefore no longer allowed to castle in
+        // the future.
+
+        let fen = "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2N2N2/PPPP1PPP/R1BQ1RK1 \
+            b kq - 7 6";
+        let mov = Move::Castle {
+            king_delta_mask: Bitboard(0x5000000000000000),
+            rook_delta_mask: Bitboard(0xa000000000000000)
+        };
+
+        test_move(fen, mov, |state| {
+            assert!(!state.position().may_long_castle(Player::Black));
+            assert!(!state.position().may_short_castle(Player::Black));
+            assert!(!state.position().may_long_castle(Player::White));
+            assert!(!state.position().may_short_castle(Player::White));
+        });
+    }
+
+    #[test]
+    fn rook_move_sets_its_castling_state() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │ r │   │ b │ q │ k │   │   │ r │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ p │ p │ p │ p │   │ p │ p │ p │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ n │   │   │ n │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ b │   │ p │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ B │   │ P │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ N │   │   │ N │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ P │ P │ P │ P │   │ P │ P │ P │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ R │   │ B │ Q │ K │   │   │ R │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // White mouse-slips the rook to f1 and subsequently is no longer
+        // allowed to castle short.
+
+        let fen = "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2N2N2/PPPP1PPP/R1BQK2R \
+            w KQkq - 0 1";
+        let mov = Move::Ordinary {
+            moved: Piece::Rook,
+            captured: None,
+            delta_mask: Bitboard(0x00000000000000a0)
+        };
+
+        test_move(fen, mov, |state| {
+            assert!(state.position().may_long_castle(Player::White));
+            assert!(!state.position().may_short_castle(Player::White));
+        });
+    }
+
+    #[test]
+    fn rook_being_captured_sets_castling_state() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │ r │   │   │   │ k │   │   │ r │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ B │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ K │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // White captures the rook on a8, which prevents black from castling
+        // long in the future.
+
+        let fen = "r3k2r/8/8/3B4/3K4/8/8/8 w kq - 0 1";
+        let mov = Move::Ordinary {
+            moved: Piece::Bishop,
+            captured: Some(Piece::Rook),
+            delta_mask: Bitboard(0x0100000800000000)
+        };
+
+        test_move(fen, mov, |state| {
+            assert!(!state.position().may_long_castle(Player::Black));
+            assert!(state.position().may_short_castle(Player::Black));
+        });
+    }
+
+    #[test]
+    fn king_move_sets_castling_state() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │ r │   │ b │ q │ k │   │   │ r │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ p │ p │ p │ p │   │ p │ p │ p │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ n │   │   │ n │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ b │   │ p │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ B │   │ P │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ N │   │   │ N │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ P │ P │ P │ P │   │ P │ P │ P │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ R │   │ B │ Q │ K │   │   │ R │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // White mouse-slips the king to f1 and subsequently is no longer
+        // allowed to castle.
+
+        let fen = "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2N2N2/PPPP1PPP/R1BQK2R \
+            w KQkq - 0 1";
+        let mov = Move::Ordinary {
+            moved: Piece::King,
+            captured: None,
+            delta_mask: Bitboard(0x0000000000000030)
+        };
+
+        test_move(fen, mov, |state| {
+            assert!(!state.position().may_long_castle(Player::White));
+            assert!(!state.position().may_short_castle(Player::White));
+        });
+    }
+
+    #[test]
+    fn pawn_double_push_sets_en_passant_file() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │ r │ n │ b │ q │ k │ b │ n │ r │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ p │ p │ p │ p │ p │ p │ p │ p │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ P │ P │ P │ P │ P │ P │ P │ P │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ R │ N │ B │ Q │ K │ B │ N │ R │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // White moves the pawn to d4.
+
+        let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+        let mov = Move::Ordinary {
+            moved: Piece::Pawn,
+            captured: None,
+            delta_mask: Bitboard(0x0000000008000800)
+        };
+
+        test_move(fen, mov, |state| {
+            assert_eq!(Some(3), state.position().en_passant_file());
+        });
+    }
+
+    #[test]
+    fn any_move_resets_en_passant_file() {
+        // Board (black to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │ r │ n │ b │ q │ k │ b │ n │ r │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ p │ p │ p │ p │ p │ p │ p │ p │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ P │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ P │ P │ P │   │ P │ P │ P │ P │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ R │ N │ B │ Q │ K │ B │ N │ R │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // Black plays knight to f6, resetting the en passant state.
+
+        let fen = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1";
+        let mov = Move::Ordinary {
+            moved: Piece::Knight,
+            captured: None,
+            delta_mask: Bitboard(0x4000200000000000)
+        };
+
+        test_move(fen, mov, |state| {
+            assert!(state.position().en_passant_file().is_none());
+        });
     }
 }

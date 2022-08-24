@@ -1,6 +1,7 @@
 //! This module defines the [Player] enumeration and any associated
 //! functionality.
 
+use crate::board::{Bitboard, BOARD_WIDTH};
 use crate::error::{FenResult, FenError};
 
 use std::mem;
@@ -129,3 +130,104 @@ pub const PLAYERS: [Player; 2] = [
     Player::White,
     Player::Black
 ];
+
+pub(crate) struct CastleInfo {
+    pub(crate) intermediate: Bitboard,
+    pub(crate) passed: Bitboard,
+    pub(crate) king_delta_mask: Bitboard,
+    pub(crate) rook_delta_mask: Bitboard
+}
+
+pub(crate) trait StaticPlayer {
+
+    type Opponent: StaticPlayer;
+
+    const SECOND_RANK: Bitboard;
+    const FOURTH_RANK: Bitboard;
+    const FIFTH_RANK: Bitboard;
+    const EIGHTH_RANK: Bitboard;
+
+    const CLOSE_ROOK_SINGLETON: Bitboard;
+    const FAR_ROOK_SINGLETON: Bitboard;
+
+    const SHORT_CASTLE_INFO: CastleInfo;
+    const LONG_CASTLE_INFO: CastleInfo;
+
+    fn forward(bitboard: Bitboard) -> Bitboard;
+
+    fn back(bitboard: Bitboard) -> Bitboard;
+}
+
+pub(crate) struct White;
+
+impl StaticPlayer for White {
+
+    type Opponent = Black;
+
+    const SECOND_RANK: Bitboard = Bitboard(0x000000000000ff00);
+    const FOURTH_RANK: Bitboard = Bitboard(0x00000000ff000000);
+    const FIFTH_RANK: Bitboard = Bitboard(0x000000ff00000000);
+    const EIGHTH_RANK: Bitboard = Bitboard(0xff00000000000000);
+
+    const CLOSE_ROOK_SINGLETON: Bitboard = Bitboard(0x0000000000000080);
+    const FAR_ROOK_SINGLETON: Bitboard = Bitboard(0x0000000000000001);
+
+    const SHORT_CASTLE_INFO: CastleInfo = CastleInfo {
+        intermediate: Bitboard(0x0000000000000060),
+        passed: Bitboard(0x0000000000000060),
+        king_delta_mask: Bitboard(0x0000000000000050),
+        rook_delta_mask: Bitboard(0x00000000000000a0)
+    };
+
+    const LONG_CASTLE_INFO: CastleInfo = CastleInfo {
+        intermediate: Bitboard(0x000000000000000e),
+        passed: Bitboard(0x000000000000000c),
+        king_delta_mask: Bitboard(0x0000000000000014),
+        rook_delta_mask: Bitboard(0x0000000000000009)
+    };
+
+    fn forward(bitboard: Bitboard) -> Bitboard {
+        bitboard << BOARD_WIDTH
+    }
+
+    fn back(bitboard: Bitboard) -> Bitboard {
+        bitboard >> BOARD_WIDTH
+    }
+}
+
+pub(crate) struct Black;
+
+impl StaticPlayer for Black {
+
+    type Opponent = White;
+
+    const SECOND_RANK: Bitboard = Bitboard(0x00ff000000000000);
+    const FOURTH_RANK: Bitboard = Bitboard(0x000000ff00000000);
+    const FIFTH_RANK: Bitboard = Bitboard(0x00000000ff000000);
+    const EIGHTH_RANK: Bitboard = Bitboard(0x00000000000000ff);
+
+    const CLOSE_ROOK_SINGLETON: Bitboard = Bitboard(0x8000000000000000);
+    const FAR_ROOK_SINGLETON: Bitboard = Bitboard(0x0100000000000000);
+
+    const SHORT_CASTLE_INFO: CastleInfo = CastleInfo {
+        intermediate: Bitboard(0x6000000000000000),
+        passed: Bitboard(0x6000000000000000),
+        king_delta_mask: Bitboard(0x5000000000000000),
+        rook_delta_mask: Bitboard(0xa000000000000000)
+    };
+
+    const LONG_CASTLE_INFO: CastleInfo = CastleInfo {
+        intermediate: Bitboard(0x0e00000000000000),
+        passed: Bitboard(0x0c00000000000000),
+        king_delta_mask: Bitboard(0x1400000000000000),
+        rook_delta_mask: Bitboard(0x0900000000000000)
+    };
+
+    fn forward(bitboard: Bitboard) -> Bitboard {
+        bitboard >> BOARD_WIDTH
+    }
+
+    fn back(bitboard: Bitboard) -> Bitboard {
+        bitboard << BOARD_WIDTH
+    }
+}
