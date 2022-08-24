@@ -701,6 +701,17 @@ fn generate_castle_moves(moves: &mut Vec<Move>, position: &Position,
     }
 }
 
+/// Returns a list of all legal moves that are available in a given position,
+/// according to all the rules of chess. The active player is taken from the
+/// position.
+///
+/// # Arguments
+///
+/// * `position`: The [Position] from which to list all legal moves.
+///
+/// # Returns
+///
+/// A new [Vec] containing all legal [Move]s, in no particular order.
 pub fn list_moves(position: &Position) -> Vec<Move> {
     let turn = position.turn();
     let board = position.board();
