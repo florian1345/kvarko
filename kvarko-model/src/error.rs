@@ -203,3 +203,33 @@ impl Error for FenError { }
 
 /// Syntactic sugar for `Result<T, FenError>`.
 pub type FenResult<T = ()> = Result<T, FenError>;
+
+/// An enumeration of the different kinds of errors that can occur when 
+/// handling [Location](crate::board::Location)s.
+#[derive(Clone, Debug)]
+pub enum LocationError {
+
+    /// Indicates that a location was constructed with a file index that does
+    /// not fit on the board.
+    FileOutOfBounds,
+
+    /// Indicates that a location was constructed with a rank index that does
+    /// not fit on the board.
+    RankOutOfBounds
+}
+
+impl Display for LocationError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            LocationError::FileOutOfBounds =>
+                write!(f, "file index out of bounds"),
+            LocationError::RankOutOfBounds =>
+                write!(f, "rank index out of bounds")
+        }
+    }
+}
+
+impl Error for LocationError { }
+
+/// Syntactic sugar for `Result<T, LocationError>`.
+pub type LocationResult<T = ()> = Result<T, LocationError>;

@@ -1,7 +1,7 @@
 //! This module defines the [Board] data structure, which stores the state of a
 //! Chess board, i.e. the pieces on the squares.
 
-use crate::error::{FenResult, FenError};
+use crate::error::{FenError, FenResult, LocationError, LocationResult};
 use crate::piece::{PIECE_COUNT, Piece, PIECES};
 use crate::player::{PLAYER_COUNT, Player};
 
@@ -21,6 +21,98 @@ use std::ops::{
     Sub,
     SubAssign
 };
+
+/// Represents the location of a single square on the board as an index.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Location(pub(crate) usize);
+
+impl Location {
+
+    /// Creates a new location that represents the square in the given file and
+    /// rank.
+    ///
+    /// # Arguments
+    ///
+    /// * `file`: The 0-based index of the file (starting with the A-file) of
+    /// the square for which to construct a location. Must be less than
+    /// [BOARD_WIDTH].
+    /// * `rank`: The 0-based index of the rank (starting with rank 1) of the
+    /// square for which to construct a location. Must be less than
+    /// [BOARD_HEIGHT].
+    ///
+    /// # Returns
+    ///
+    /// A new location representing the square at the given file and rank.
+    ///
+    /// # Errors
+    ///
+    /// * [LocationError::FileOutOfBounds] if `file` is too large, i.e. greater
+    /// than or equal to [BOARD_WIDTH].
+    /// * [LocationError::RankOutOfBounds] if `rank` is too large, i.e. greater
+    /// than or equal to [BOARD_HEIGHT].
+    pub fn from_file_and_rank<F, R>(file: F, rank: R)
+        -> LocationResult<Location>
+    where
+        F: Into<usize>,
+        R: Into<usize>
+    {
+        let file = file.into();
+        let rank = rank.into();
+
+        if file >= BOARD_WIDTH {
+            Err(LocationError::FileOutOfBounds)
+        }
+        else if rank >= BOARD_HEIGHT {
+            Err(LocationError::RankOutOfBounds)
+        }
+        else {
+            Ok(Location(rank * BOARD_WIDTH + file))
+        }
+    }
+}
+
+/// An [Iterator] over [Location]s of the squares contained in a [Bitboard].
+pub struct BitboardLocationIter {
+    bitboard: Bitboard
+}
+
+impl Iterator for BitboardLocationIter {
+    type Item = Location;
+
+    fn next(&mut self) -> Option<Location> {
+        if self.bitboard.is_empty() {
+            None
+        }
+        else {
+            let trailing_zeros = self.bitboard.0.trailing_zeros();
+            self.bitboard -= Bitboard(1) << trailing_zeros;
+            Some(Location(trailing_zeros as usize))
+        }
+    }
+}
+
+/// An [Iterator] over singletons of the squares contained in a [Bitboard].
+/// That is, this iterator yields for each square in the bitboard over which is
+/// iterated another bitboard containing only that square.
+pub struct BitboardSingletonIter {
+    bitboard: Bitboard
+}
+
+impl Iterator for BitboardSingletonIter {
+    type Item = Bitboard;
+
+    fn next(&mut self) -> Option<Bitboard> {
+        if self.bitboard.is_empty() {
+            None
+        }
+        else {
+            let trailing_zeros = self.bitboard.0.trailing_zeros();
+            let result = Bitboard(1) << trailing_zeros;
+            self.bitboard -= result;
+            Some(result)
+        }
+    }
+}
 
 /// A bitboard is a 64-bit data type that has one bit associated with each
 /// square of a board. It can be viewed as a subset of squares, or a predicate
@@ -47,18 +139,21 @@ impl Bitboard {
     /// The bitboard which contains no field.
     pub const EMPTY: Bitboard = Bitboard(0);
 
+    /// The bitboard which contains every field.
+    pub const FULL: Bitboard = Bitboard(0xffffffffffffffff);
+
     /// Creates a new bitboard which contains exactly one field.
     ///
     /// # Arguments
     ///
-    /// * `location`: The location of the field which shall be contained in the
-    /// resulting bitboard.
+    /// * `location`: The [Location] of the field which shall be contained in
+    /// the resulting bitboard.
     ///
     /// # Returns
     ///
     /// A new bitboard which contains `location` and nothing else.
-    pub fn singleton(location: usize) -> Bitboard {
-        Bitboard(1 << location)
+    pub fn singleton(location: Location) -> Bitboard {
+        Bitboard(1 << location.0)
     }
 
     /// Gets the number of fields contained in this bitboard.
@@ -73,6 +168,84 @@ impl Bitboard {
     /// True, if and only if this bitboard is empty.
     pub fn is_empty(self) -> bool {
         self.0 == 0
+    }
+
+    /// Gets the location of the square with minimum index contained in this
+    /// bitboard. The main purpose for this is efficiently extracting the
+    /// location of the square contained in a singleton bitboard.
+    ///
+    /// This method does not check that this bitboard is non-empty. If it is
+    /// empty, an invalid location is returned, which may cause a hard-to-find
+    /// error down the road. If you are unsure whether your bitboard is
+    /// non-empty, use [Bitboard::min] instead.
+    ///
+    /// # Returns
+    ///
+    /// A new location representing the square with minimum index contained in
+    /// this bitboard.
+    pub fn min_unchecked(self) -> Location {
+        Location(self.0.trailing_zeros() as usize)
+    }
+
+    /// Gets the location of the square with minimum index contained in this
+    /// bitboard, if one exists. The main purpose for this is efficiently
+    /// extracting the location of the square contained in a singleton
+    /// bitboard.
+    ///
+    /// # Returns
+    ///
+    /// `Some(location)` with the location representingthe square with minimum
+    /// index contained in this bitboard, if it is non-empty. `None` if this
+    /// bitboard is empty.
+    pub fn min(self) -> Option<Location> {
+        if self.is_empty() {
+            None
+        }
+        else {
+            Some(self.min_unchecked())
+        }
+    }
+
+    /// Indicates whether the square with the given location is contained in
+    /// this bitboard.
+    ///
+    /// # Arguments
+    ///
+    /// * `location`: The [Location] for which to check whether it is contained
+    /// in this bitboard.
+    ///
+    /// # Returns
+    ///
+    /// True if and only if the square with the given location is contained in
+    /// this bitboard.
+    pub fn contains(self, location: Location) -> bool {
+        (self.0 & (1u64 << location.0)) != 0
+    }
+
+    /// Creates an iterator over the locations of all squared contained in this
+    /// bitboard, in ascending order of index.
+    ///
+    /// # Returns
+    ///
+    /// A new [BitboardLocationIter] over this bitboard.
+    pub fn locations(self) -> BitboardLocationIter {
+        BitboardLocationIter {
+            bitboard: self
+        }
+    }
+
+    /// Creates an iterator over singleton bitboards for all squares contained
+    /// in this bitboard, in ascending order of location index. That is, for
+    /// every square in this bitboard, the created iterator yields another
+    /// bitboard which contains only that square.
+    ///
+    /// # Returns
+    ///
+    /// A new [BitboardSingletonIter] over this bitboard.
+    pub fn singletons(self) -> BitboardSingletonIter {
+        BitboardSingletonIter {
+            bitboard: self
+        }
     }
 }
 
@@ -219,15 +392,15 @@ pub const BOARD_WIDTH: usize = 8;
 /// The height of a Chess board, i.e. the number of ranks.
 pub const BOARD_HEIGHT: usize = 8;
 
-const INITIAL_WHITE: Bitboard = Bitboard(0xffff000000000000);
-const INITIAL_BLACK: Bitboard = Bitboard(0x000000000000ffff);
+const INITIAL_WHITE: Bitboard = Bitboard(0x000000000000ffff);
+const INITIAL_BLACK: Bitboard = Bitboard(0xffff000000000000);
 
 const INITIAL_PAWN: Bitboard = Bitboard(0x00ff00000000ff00);
 const INITIAL_KNIGHT: Bitboard = Bitboard(0x4200000000000042);
 const INITIAL_BISHOP: Bitboard = Bitboard(0x2400000000000024);
 const INITIAL_ROOK: Bitboard = Bitboard(0x8100000000000081);
-const INITIAL_QUEEN: Bitboard = Bitboard(0x1000000000000010);
-const INITIAL_KING: Bitboard = Bitboard(0x0800000000000008);
+const INITIAL_QUEEN: Bitboard = Bitboard(0x0800000000000008);
+const INITIAL_KING: Bitboard = Bitboard(0x1000000000000010);
 
 fn write_fen_gap(fen: &mut String, gap_counter: &mut usize) {
     if *gap_counter != 0 {
@@ -285,12 +458,74 @@ impl Board {
         }
     }
 
-    fn players(&self, player: Player) -> Bitboard {
+    /// Gets a bitboard containing the fields on which a piece of the given
+    /// player stands.
+    ///
+    /// # Arguments
+    ///
+    /// * `player`: The [Player] for which to get a bitboard of their pieces.
+    ///
+    /// # Returns
+    ///
+    /// A [Bitboard] containing the fields with a piece of `player`.
+    pub fn of_player(&self, player: Player) -> Bitboard {
         self.players[player as usize]
     }
 
-    fn pieces(&self, piece: Piece) -> Bitboard {
+    /// Gets a bitboard containing the fields on which a piece of the given
+    /// kind stands.
+    ///
+    /// # Arguments
+    ///
+    /// * `piece`: The [Piece] kind for which to get a bitboard of its pieces.
+    ///
+    /// # Returns
+    ///
+    /// A [Bitboard] containing the fields with a piece of the given `piece`
+    /// kind.
+    pub fn of_kind(&self, piece: Piece) -> Bitboard {
         self.pieces[piece as usize]
+    }
+
+    /// Gets a bitboard containing the fields on which a piece of the given
+    /// player and kind stands.
+    ///
+    /// # Arguments
+    ///
+    /// * `player`: The [Player] for which to get a bitboard of their pieces of
+    /// the given kind.
+    /// * `piece`: The [Piece] kind for which to get a bitboard of its pieces
+    /// of the given player.
+    ///
+    /// # Returns
+    ///
+    /// A [Bitboard] containing the fields with a piece of `player` and `piece`
+    /// kind.
+    pub fn of_player_and_kind(&self, player: Player, piece: Piece)
+            -> Bitboard {
+        self.of_player(player) & self.of_kind(piece)
+    }
+
+    pub fn is_of_kind(&self, piece: Piece, location: Location) -> bool {
+        self.of_kind(piece).contains(location)
+    }
+
+    pub fn is_of_kind_any(&self, piece: Piece, fields: Bitboard) -> bool {
+        !(self.of_kind(piece) & fields).is_empty()
+    }
+
+    pub fn is_of_kind_all(&self, piece: Piece, fields: Bitboard) -> bool {
+        self.of_kind(piece) & fields == fields
+    }
+
+    pub(crate) fn kind_at(&self, singleton: Bitboard) -> Piece {
+        for piece in PIECES {
+            if !(self.pieces[piece as usize] & singleton).is_empty() {
+                return piece;
+            }
+        }
+
+        panic!("no piece at given singleton, internal error")
     }
 
     fn players_mut(&mut self, player: Player) -> &mut Bitboard {
@@ -302,7 +537,7 @@ impl Board {
     }
 
     fn set(&mut self, location: usize, piece: Piece, player: Player) {
-        let mask = Bitboard::singleton(location);
+        let mask = Bitboard::singleton(Location(location));
 
         *self.players_mut(player) |= mask;
         *self.players_mut(player.opponent()) -= mask;
@@ -318,18 +553,18 @@ impl Board {
     }
 
     fn get(&self, location: usize) -> Option<(Piece, Player)> {
-        let mask = Bitboard::singleton(location);
-        let player = if !(self.players(Player::White) & mask).is_empty() {
+        let mask = Bitboard::singleton(Location(location));
+        let player = if !(self.of_player(Player::White) & mask).is_empty() {
             Player::White
         }
-        else if !(self.players(Player::Black) & mask).is_empty() {
+        else if !(self.of_player(Player::Black) & mask).is_empty() {
             Player::Black
         }
         else {
             return None;
         };
         let piece = *PIECES.iter()
-            .filter(|&&p| !(self.pieces(p) & mask).is_empty())
+            .filter(|&&p| !(self.of_kind(p) & mask).is_empty())
             .next()
             .expect("no piece in occupied field");
 
@@ -439,6 +674,74 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn empty_bitboard_location_iterator() {
+        assert!(Bitboard::EMPTY.locations().next().is_none());
+    }
+
+    #[test]
+    fn bitboard_with_min_location_iterator() {
+        let bitboard = Bitboard(0x0000000000000131);
+        let locations = bitboard.locations().collect::<Vec<_>>();
+
+        assert_eq!(
+            vec![Location(0), Location(4), Location(5), Location(8)],
+            locations);
+    }
+
+    #[test]
+    fn bitboard_with_max_location_iterator() {
+        let bitboard = Bitboard(0x8000000000000130);
+        let locations = bitboard.locations().collect::<Vec<_>>();
+
+        assert_eq!(
+            vec![Location(4), Location(5), Location(8), Location(63)],
+            locations);
+    }
+
+    #[test]
+    fn empty_bitboard_singleton_iterator() {
+        assert!(Bitboard::EMPTY.singletons().next().is_none());
+    }
+
+    #[test]
+    fn bitboard_with_min_singleton_iterator() {
+        let bitboard = Bitboard(0x0000000000000131);
+        let locations = bitboard.singletons().collect::<Vec<_>>();
+
+        assert_eq!(
+            vec![
+                Bitboard(0x1),
+                Bitboard(0x10),
+                Bitboard(0x20),
+                Bitboard(0x100)],
+            locations);
+    }
+
+    #[test]
+    fn bitboard_with_max_singleton_iterator() {
+        let bitboard = Bitboard(0x8000000000000130);
+        let locations = bitboard.singletons().collect::<Vec<_>>();
+
+        assert_eq!(
+            vec![
+                Bitboard(0x10),
+                Bitboard(0x20),
+                Bitboard(0x100),
+                Bitboard(0x8000000000000000)],
+            locations);
+    }
+
+    const INITIAL_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
+
+    #[test]
+    fn initial_board_equals_initial_fen() {
+        let initial = Board::initial();
+        let initial_fen = Board::from_fen(INITIAL_FEN).unwrap();
+
+        assert_eq!(initial_fen, initial);
+    }
+
     fn assert_board_fen_reproducible(fen: &str) {
         let board = Board::from_fen(fen).expect("test board FEN not accepted");
         let new_fen = board.to_fen();
@@ -453,8 +756,7 @@ mod tests {
 
     #[test]
     fn initial_board_fen_reproducible() {
-        assert_board_fen_reproducible(
-            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR");
+        assert_board_fen_reproducible(INITIAL_FEN);
     }
 
     #[test]

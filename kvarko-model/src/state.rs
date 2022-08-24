@@ -91,10 +91,7 @@ fn parse_castling_rights(fen: &str)
 }
 
 fn parse_en_passant_file(fen: &str) -> FenResult<usize> {
-    if fen.is_empty() {
-        Err(FenError::InvalidEnPassantTarget(fen.to_owned()))
-    }
-    else if fen == "-" {
+    if fen == "-" {
         Ok(usize::MAX)
     }
     else {
@@ -112,7 +109,7 @@ fn parse_en_passant_file(fen: &str) -> FenResult<usize> {
                 Err(FenError::InvalidEnPassantTarget(fen.to_owned()))
             }
             else {
-                Ok(file_char as usize - '1' as usize)
+                Ok(file_char as usize - 'a' as usize)
             }
         }
     }
