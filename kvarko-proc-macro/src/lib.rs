@@ -379,7 +379,7 @@ fn to_table_array(table: &[u64]) -> ExprArray {
 /// stores JSON defining a set of magic numbers for magic bitboard move
 /// generation. The file must have the following schema:
 ///
-/// ```norun
+/// ```no_run
 /// {
 ///   "size": usize,
 ///   "bishop": [Magic; 64],
@@ -389,7 +389,7 @@ fn to_table_array(table: &[u64]) -> ExprArray {
 ///
 /// Where `Magic` is defined as follows.
 ///
-/// ```norun
+/// ```no_run
 /// {
 ///   "offset": usize,
 ///   "premask": u64,

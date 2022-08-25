@@ -491,7 +491,7 @@ fn generate_pawn_capture_moves_from_direction<D: StaticPlayer>(
             let mut position = position.clone();
             position.make_move(&mov);
 
-            let any_king_captures = list_moves(&position).iter().any(|m| {
+            let any_king_captures = list_moves(&position).0.iter().any(|m| {
                 match m {
                     &Move::Ordinary { captured, .. } |
                     &Move::Promotion { captured, .. } =>
@@ -625,8 +625,10 @@ fn generate_castle_moves(moves: &mut Vec<Move>, position: &Position,
 ///
 /// # Returns
 ///
-/// A new [Vec] containing all legal [Move]s, in no particular order.
-pub fn list_moves(position: &Position) -> Vec<Move> {
+/// A new [Vec] containing all legal [Move]s, in no particular order. As a
+/// second return parameter, a flag whether the player whose move it is is
+/// currently in check.
+pub fn list_moves(position: &Position) -> (Vec<Move>, bool) {
     let turn = position.turn();
     let board = position.board();
     let en_passant_target = if let Some(en_passant_file) =
@@ -658,7 +660,7 @@ pub fn list_moves(position: &Position) -> Vec<Move> {
     if king_attackers.all.len() > 1 {
         // Double check => only the king can move.
 
-        return moves;
+        return (moves, true);
     }
 
     let mut capture_mask = Bitboard::FULL;
@@ -731,7 +733,7 @@ pub fn list_moves(position: &Position) -> Vec<Move> {
         generate_queen_moves(&mut moves, board, turn, mask, queen);
     }
 
-    moves
+    (moves, !king_attackers.all.is_empty())
 }
 
 #[cfg(test)]
@@ -854,7 +856,7 @@ mod tests {
         let position = Position::initial();
         let moves = list_moves(&position);
 
-        assert_eq!(20, moves.len());
+        assert_eq!(20, moves.0.len());
     }
 
     #[test]
@@ -884,11 +886,11 @@ mod tests {
         let position = Position::from_fen(fen).unwrap();
         let moves = list_moves(&position);
 
-        assert_eq!(33, moves.len());
+        assert_eq!(33, moves.0.len());
     }
 
     fn list_moves_from(position: &Position, from: Location) -> Vec<Move> {
-        let moves = list_moves(&position);
+        let moves = list_moves(&position).0;
         let mut moves_from = Vec::new();
 
         for mov in moves {
@@ -1197,7 +1199,7 @@ mod tests {
 
         let fen = "r2k3R/1n6/pp6/1b1N1B1K/1P5P/P5r1/8/8 b - -";
         let position = Position::from_fen(fen).unwrap();
-        let moves = list_moves(&position);
+        let moves = list_moves(&position).0;
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::Bishop,
@@ -1241,7 +1243,7 @@ mod tests {
 
         let fen = "r2k3R/1n6/pp6/3N1B1r/1P1b3P/P5K1/8/8 b - -";
         let position = Position::from_fen(fen).unwrap();
-        let moves = list_moves(&position);
+        let moves = list_moves(&position).0;
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::Bishop,
@@ -1366,7 +1368,7 @@ mod tests {
 
         let fen = "8/3k4/8/7b/2q1K3/3N4/8/4Q3 w - -";
         let position = Position::from_fen(fen).unwrap();
-        let moves = list_moves(&position);
+        let moves = list_moves(&position).0;
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::King,
@@ -1415,7 +1417,7 @@ mod tests {
 
         let fen = "2r5/2r2bn1/8/p4k2/P2pP2B/1B3P2/6PP/3R1RK1 b - e3";
         let position = Position::from_fen(fen).unwrap();
-        let moves = list_moves(&position);
+        let moves = list_moves(&position).0;
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::King,
@@ -1478,7 +1480,7 @@ mod tests {
 
         let fen = "2b4r/8/5p2/3Pp3/6K1/8/1B4k1/4R3 w - e6";
         let position = Position::from_fen(fen).unwrap();
-        let moves = list_moves(&position);
+        let moves = list_moves(&position).0;
         let expected_moves = vec![
             Move::EnPassant { 
                 delta_mask: Bitboard(0x0000100800000000),
@@ -2169,7 +2171,7 @@ mod tests {
 
         let fen = "3r2k1/5ppp/8/8/1Q6/1Pn5/P7/3K4 w - - 0 1";
         let position = Position::from_fen(fen).unwrap();
-        let moves = list_moves(&position);
+        let moves = list_moves(&position).0;
         let moves_from_d1 = list_moves_from(&position, Location(3));
 
         assert_set_equals(moves, moves_from_d1);

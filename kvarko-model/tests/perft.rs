@@ -7,12 +7,12 @@ fn perft_rec(state: &mut State, depth: usize) -> usize {
     }
 
     if depth == 1 {
-        return list_moves(state.position()).len();
+        return list_moves(state.position()).0.len();
     }
 
     let mut sum = 0;
 
-    for mov in list_moves(state.position()) {
+    for mov in list_moves(state.position()).0 {
         let revert_info = state.make_move(&mov);
         sum += perft_rec(state, depth - 1);
         state.unmake_move(&mov, revert_info);
