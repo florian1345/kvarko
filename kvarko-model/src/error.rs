@@ -233,3 +233,29 @@ impl Error for LocationError { }
 
 /// Syntactic sugar for `Result<T, LocationError>`.
 pub type LocationResult<T = ()> = Result<T, LocationError>;
+
+/// An enumeration of the different kinds of errors that can occur when
+/// building games using a [GameBuilder](crate::game::GameBuilder).
+#[derive(Clone, Debug)]
+pub enum BuildGameError {
+
+    /// Indicates that some player (provided as tuple component) has no
+    /// associated controller.
+    MissingController(Player)
+}
+
+impl Display for BuildGameError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            BuildGameError::MissingController(Player::White) =>
+                write!(f, "white has no associated controller"),
+            BuildGameError::MissingController(Player::Black) =>
+                write!(f, "black has no associated controller")
+        }
+    }
+}
+
+impl Error for BuildGameError { }
+
+/// Syntactic sugar for `Result<T, BuildGameError>`.
+pub type BuildGameResult<T = ()> = Result<T, BuildGameError>;

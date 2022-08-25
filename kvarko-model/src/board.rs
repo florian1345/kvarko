@@ -233,6 +233,10 @@ impl Bitboard {
         (self.0 & (1u64 << location.0)) != 0
     }
 
+    pub fn is_subset(self, other: Bitboard) -> bool {
+        self & other == self
+    }
+
     /// Creates an iterator over the locations of all squared contained in this
     /// bitboard, in ascending order of index.
     ///

@@ -3,7 +3,7 @@
 
 use crate::board::{Board, Bitboard};
 use crate::error::{FenError, FenResult};
-use crate::movement::Move;
+use crate::movement::{Move, list_moves};
 use crate::piece::Piece;
 use crate::player::{Black, Player, StaticPlayer, White, PLAYER_COUNT, PLAYERS};
 use crate::rules;
@@ -432,6 +432,20 @@ impl Position {
     }
 }
 
+const LIGHT_SQUARES: Bitboard = Bitboard(0xcccccccccccccccc);
+const DARK_SQUARES: Bitboard = Bitboard(0x5555555555555555);
+
+/// An enumeration of the different outcomes a game of Chess can have.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Outcome {
+
+    /// The given [Player] won the game.
+    Victory(Player),
+
+    /// Any condition for a draw was met.
+    Draw
+}
+
 /// Returned by [State::make_move] to allow reverting the move with
 /// [State::unmake_move].
 #[derive(Clone, Debug)]
@@ -664,6 +678,68 @@ impl State {
         self.last_irreversible = revert_info.last_irreversible;
         self.fifty_move_clock = revert_info.fifty_move_clock;
         self.position.unmake_move(mov, revert_info.position_revert_info);
+    }
+
+    /// Check whether this state constitutes an end state of the game and, if
+    /// so, determines the outcome.
+    ///
+    /// # Returns
+    ///
+    /// `Some(outcome)` with the [Outcome] of the game that ended in this state
+    /// and `None` if the game has not yet ended.
+    pub fn compute_outcome(&self) -> Option<Outcome> {
+        let (moves, check) = list_moves(&self.position);
+
+        if moves.is_empty() {
+            if check {
+                return Some(Outcome::Victory(self.position.turn().opponent()));
+            }
+            else {
+                // Draw by stalemate
+
+                return Some(Outcome::Draw);
+            }
+        }
+
+        if self.fifty_move_clock >= rules::DRAW_NO_PROGRESS_COUNT {
+            // Draw by fifty-move rule
+
+            return Some(Outcome::Draw);
+        }
+
+        let mut repetitions = 1;
+
+        for old_position in self.reversible_history() {
+            if old_position == &self.position {
+                repetitions += 1;
+
+                if repetitions == rules::DRAW_REPETITION_COUNT {
+                    // Draw by repetition
+
+                    return Some(Outcome::Draw);
+                }
+            }
+        }
+
+        let board = self.position.board();
+
+        if (board.of_kind(Piece::Pawn) | board.of_kind(Piece::Rook) |
+                board.of_kind(Piece::Queen)).is_empty() {
+            let knights = board.of_kind(Piece::Knight);
+            let bishops = board.of_kind(Piece::Bishop);
+            let insufficient_material =
+                (knights.len() == 1 && bishops.is_empty()) ||
+                (knights.is_empty() && (bishops.is_subset(LIGHT_SQUARES) ||
+                    bishops.is_subset(DARK_SQUARES)));
+
+            if insufficient_material {
+                // Draw by insufficient material
+
+                return Some(Outcome::Draw);
+            }
+        }
+
+        None
     }
 
     /// Converts the current state into a FEN string in the format defined in
