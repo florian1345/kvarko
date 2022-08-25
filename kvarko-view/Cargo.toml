@@ -6,3 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+ggez = "0.7"
+kvarko-model = { path = "../kvarko-model" }
+tokio = { version = "1.18", features = [ "sync" ] }

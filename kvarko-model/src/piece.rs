@@ -7,7 +7,7 @@ use crate::error::{FenResult, FenError};
 /// encode the [Player] who owns the piece. This can be converted to a [usize]
 /// to obtain the piece index.
 #[repr(usize)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Piece {
 
     /// A pawn. Can move forwards (towards the enemy's base) by one without

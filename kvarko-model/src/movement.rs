@@ -125,6 +125,26 @@ pub enum Move {
     }
 }
 
+impl Move {
+
+    fn delta_mask(&self) -> Bitboard {
+        match self {
+            Move::Ordinary { delta_mask, .. } => *delta_mask,
+            Move::EnPassant { delta_mask, .. } => *delta_mask,
+            Move::Promotion { delta_mask, .. } => *delta_mask,
+            Move::Castle { king_delta_mask: delta_mask, .. } => *delta_mask
+        }
+    }
+
+    pub fn source(&self, position: &Position) -> Option<Location> {
+        (self.delta_mask() & position.board().of_player(position.turn())).min()
+    }
+
+    pub fn destination(&self, position: &Position) -> Option<Location> {
+        (self.delta_mask() - position.board().of_player(position.turn())).min()
+    }
+}
+
 struct CheckEvasionMasks {
     capture_mask: Bitboard,
     push_mask: Bitboard
@@ -259,7 +279,7 @@ where
             None
         }
         else {
-            Some(board.kind_at(target_singleton))
+            Some(board.piece_at_singleton(target_singleton))
         };
 
         process(captured, target_singleton);
@@ -894,14 +914,9 @@ mod tests {
         let mut moves_from = Vec::new();
 
         for mov in moves {
-            let delta_mask = match &mov {
-                Move::Ordinary { delta_mask, .. } => delta_mask,
-                Move::EnPassant { delta_mask, .. } => delta_mask,
-                Move::Promotion { delta_mask, .. } => delta_mask,
-                Move::Castle { king_delta_mask: delta_mask, .. } => delta_mask
-            };
+            let delta_mask = mov.delta_mask();
 
-            if (*delta_mask).contains(from) {
+            if delta_mask.contains(from) {
                 moves_from.push(mov);
             }
         }

@@ -4,7 +4,7 @@
 use crate::error::{FenError, FenResult, LocationError, LocationResult};
 use crate::movement::Move;
 use crate::piece::{PIECE_COUNT, Piece, PIECES};
-use crate::player::{PLAYER_COUNT, Player};
+use crate::player::{PLAYER_COUNT, Player, PLAYERS};
 
 use std::cmp::Ordering;
 use std::ops::{
@@ -573,7 +573,27 @@ impl Board {
         self.of_kind(piece) & fields == fields
     }
 
-    pub(crate) fn kind_at(&self, singleton: Bitboard) -> Piece {
+    pub fn piece_at(&self, location: Location) -> Option<Piece> {
+        for piece in PIECES {
+            if self.pieces[piece as usize].contains(location) {
+                return Some(piece);
+            }
+        }
+
+        None
+    }
+
+    pub fn player_at(&self, location: Location) -> Option<Player> {
+        for player in PLAYERS {
+            if self.players[player as usize].contains(location) {
+                return Some(player);
+            }
+        }
+
+        None
+    }
+
+    pub(crate) fn piece_at_singleton(&self, singleton: Bitboard) -> Piece {
         for piece in PIECES {
             if !(self.pieces[piece as usize] & singleton).is_empty() {
                 return piece;

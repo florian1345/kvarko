@@ -3,6 +3,42 @@ use crate::movement::Move;
 use crate::player::Player;
 use crate::state::{Outcome, State};
 
+/// A trait for types that consume events raised in a game of chess.
+pub trait Observer {
+
+    /// Notification that all initial variables have been specified and the
+    /// game is now in the initial state. No moves have been made yet.
+    ///
+    /// # Arguments
+    ///
+    /// * `_initial_state`: The initial [State].
+    fn on_started(&mut self, _initial_state: &State) { }
+
+    /// Notification that a move has been made and the game state has changed.
+    ///
+    /// # Arguments
+    ///
+    /// * `_mov`: The [Move] that has been made.
+    /// * `_new_state`: The [State] after the move has been applied. The player
+    /// offered by [Position::turn](crate::state::Position::turn) on
+    /// [State::position] is now the player whose turn it is after the move,
+    /// i.e. the opponent of the player who made the given move.
+    fn on_move_made(&mut self, _mov: &Move, _new_state: &State) { }
+
+    /// Notification that an outcome of the game could be determined, that is,
+    /// one player checkmated the other or it is a draw.
+    ///
+    /// This notification comes after the [Observer::on_move_made] notification
+    /// of the last move in the game.
+    ///
+    /// # Arguments
+    ///
+    /// * `_outcome`: The [Outcome] of the game (victory of one player or
+    /// draw).
+    /// * `_final_state`: The final [State] of the game.
+    fn on_outcome(&mut self, _outcome: Outcome, _final_state: &State) { }
+}
+
 /// A controller makes moves for a player in a game of Chess. This trait is to
 /// be implemented by all AIs.
 pub trait Controller {
@@ -38,10 +74,32 @@ pub struct Game {
     state: State,
     white: Box<dyn Controller>,
     black: Box<dyn Controller>,
+    observers: Vec<Box<dyn Observer>>,
     outcome: Option<Outcome>
 }
 
 impl Game {
+
+    fn update_outcome(&mut self) {
+        self.outcome = self.state.compute_outcome();
+
+        if self.outcome.is_some() {
+            for observer in &mut self.observers {
+                observer.on_outcome(self.outcome.unwrap(), &self.state);
+            }
+        }
+    }
+
+    fn init(&mut self) {
+        self.white.initialize(Player::White);
+        self.black.initialize(Player::Black);
+
+        for observer in &mut self.observers {
+            observer.on_started(&self.state);
+        }
+
+        self.update_outcome();
+    }
 
     /// Plays a single move (or "ply" in Chess terminology) by the currently
     /// active player. The decision is made by the [Controller] associated with
@@ -63,7 +121,13 @@ impl Game {
         };
 
         self.state.make_move(&mov);
-        self.outcome = self.state.compute_outcome();
+
+        for observer in &mut self.observers {
+            observer.on_move_made(&mov, &self.state);
+        }
+
+        self.update_outcome();
+
         self.outcome
     }
 
@@ -86,7 +150,8 @@ impl Game {
 pub struct GameBuilder {
     state: State,
     white: Option<Box<dyn Controller>>,
-    black: Option<Box<dyn Controller>>
+    black: Option<Box<dyn Controller>>,
+    observers: Vec<Box<dyn Observer>>
 }
 
 impl GameBuilder {
@@ -96,7 +161,8 @@ impl GameBuilder {
         GameBuilder {
             state: State::initial(),
             white: None,
-            black: None
+            black: None,
+            observers: Vec::new()
         }
     }
 
@@ -190,6 +256,41 @@ impl GameBuilder {
         self.with_black_box(Box::new(controller))
     }
 
+    /// Adds a new observer which will receive game events for the constructed
+    /// game. This method accepts a boxed observer. To pass any instance
+    /// implementing [Observer], use [GameBuilder::with_observer].
+    ///
+    /// # Arguments
+    ///
+    /// * `observer`: The boxed [Observer] to receive game events.
+    ///
+    /// # Returns
+    ///
+    /// This builder for chaining.
+    pub fn with_observer_box(mut self, observer: Box<dyn Observer>)
+            -> GameBuilder {
+        self.observers.push(observer);
+        self
+    }
+
+    /// Adds a new observer which will receive game events for the constructed
+    /// game. This method accepts an implementation of [Observer] directly. To
+    /// pass a trait object, use [GameBuilder::with_observer_box].
+    ///
+    /// # Arguments
+    ///
+    /// * `observer`: The [Observer] to receive game events.
+    ///
+    /// # Returns
+    ///
+    /// This builder for chaining.
+    pub fn with_observer<O>(self, observer: O) -> GameBuilder
+    where
+        O: Observer + 'static
+    {
+        self.with_observer_box(Box::new(observer))
+    }
+
     /// Constructs the final game with the components provided in previous
     /// method calls. It is required that at least the controllers have been
     /// specified, i.e. [GameBuilder::with_white] or
@@ -204,21 +305,20 @@ impl GameBuilder {
     ///
     /// Any [BuildGameError] according to their documentation.
     pub fn build(self) -> BuildGameResult<Game> {
-        let mut white = self.white
+        let white = self.white
             .ok_or(BuildGameError::MissingController(Player::White))?;
-        let mut black = self.black
+        let black = self.black
             .ok_or(BuildGameError::MissingController(Player::Black))?;
-
-        white.initialize(Player::White);
-        black.initialize(Player::Black);
-
-        let outcome = self.state.compute_outcome();
-
-        Ok(Game {
+        let mut game = Game {
             state: self.state,
             white,
             black,
-            outcome
-        })
+            outcome: None,
+            observers: self.observers
+        };
+
+        game.init();
+
+        Ok(game)
     }
 }

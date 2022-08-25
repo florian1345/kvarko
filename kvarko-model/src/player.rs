@@ -9,7 +9,7 @@ use std::mem;
 /// An enumeration of the two different players. This can be converted to a
 /// [usize] to obtain the player index.
 #[repr(usize)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Player {
 
     /// The white player who initially occupies the lower ranks and starts the
