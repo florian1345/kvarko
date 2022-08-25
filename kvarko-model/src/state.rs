@@ -283,7 +283,8 @@ impl Position {
             self.short_castles[self.turn as usize] = false;
             self.long_castles[self.turn as usize] = false;
         }
-        else if moved == Piece::Rook {
+
+        if moved == Piece::Rook {
             if !(delta_mask & P::CLOSE_ROOK_SINGLETON).is_empty() {
                 self.short_castles[self.turn as usize] = false;
             }
@@ -292,7 +293,8 @@ impl Position {
                 self.long_castles[self.turn as usize] = false;
             }
         }
-        else if captured == Some(Piece::Rook) {
+
+        if captured == Some(Piece::Rook) {
             let opponent = self.turn.opponent();
 
             if !(delta_mask & P::Opponent::CLOSE_ROOK_SINGLETON).is_empty() {
@@ -338,8 +340,11 @@ impl Position {
             &Move::Castle { .. } => {
                 self.short_castles[self.turn as usize] = false;
                 self.long_castles[self.turn as usize] = false;
+                self.en_passant_file = usize::MAX;
             },
-            _ => { }
+            _ => {
+                self.en_passant_file = usize::MAX;
+            }
         }
 
         self.board.make_move(self.turn, mov);
@@ -397,7 +402,8 @@ impl Position {
                 fen.push(player.convert_fen_piece_char(c));
                 any_castle = true;
             }
-            else if self.may_long_castle(player) {
+
+            if self.may_long_castle(player) {
                 let c = Piece::Queen.to_fen_char();
                 fen.push(player.convert_fen_piece_char(c));
                 any_castle = true;

@@ -7,3 +7,6 @@ members = [
     "kvarko-proc-macro",
     "kvarko-view"
 ]
+
+[profile.test]
+opt-level = 1

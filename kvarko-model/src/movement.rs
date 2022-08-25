@@ -40,7 +40,7 @@ fn get_pawn_push<D: StaticPlayer>(occupancy: Bitboard,
 fn get_pawn_attack<D: StaticPlayer>(square_singleton: Bitboard) -> Bitboard {
     let straight = D::forward(square_singleton);
     let diagonal =
-        ((straight << 1) & !RIGHT_FILE) | ((straight >> 1) & !LEFT_FILE);
+        ((straight << 1) & !LEFT_FILE) | ((straight >> 1) & !RIGHT_FILE);
     diagonal
 }
 
@@ -385,9 +385,10 @@ where
 /// Generates all moves of pinned pieces of the given player. Returns a
 /// bitboard of all fields on which a pinned piece stands. These can be
 /// excluded for future move generation.
-fn generate_pin_moves(moves: &mut Vec<Move>, board: &Board,
+fn generate_pin_moves(moves: &mut Vec<Move>, position: &Position,
         en_passant_target: Bitboard, player: Player, masks: &CheckEvasionMasks)
         -> Bitboard {
+    let board = position.board();
     let mask = masks.union();
     let orthogonal_pins = generate_directional_pin_moves(
         moves, board, player, mask, get_rook_attack, Piece::Rook,
@@ -397,7 +398,7 @@ fn generate_pin_moves(moves: &mut Vec<Move>, board: &Board,
     let diagonal_pins = generate_directional_pin_moves(
         moves, board, player, mask, get_bishop_attack, Piece::Bishop,
             |moves, pawn_singleton, mask|
-                generate_pawn_capture_moves(moves, board, player,
+                generate_pawn_capture_moves(moves, position, player,
                     pawn_singleton, en_passant_target,
                     &CheckEvasionMasks {
                         capture_mask: masks.capture_mask & mask,
@@ -453,11 +454,12 @@ fn generate_pawn_push_moves(moves: &mut Vec<Move>, board: &Board,
 }
 
 fn generate_pawn_capture_moves_from_direction<D: StaticPlayer>(
-        moves: &mut Vec<Move>, board: &Board, player: Player,
+        moves: &mut Vec<Move>, position: &Position, player: Player,
         source_singleton: Bitboard, en_passant_target: Bitboard,
         masks: &CheckEvasionMasks) {
     // TODO avoid recomputation of masks.union()
 
+    let board = position.board();
     let opponent_pieces = board.of_player(player.opponent());
     let attack = get_pawn_attack::<D>(source_singleton);
     let capture_targets = attack & opponent_pieces & masks.capture_mask;
@@ -478,49 +480,44 @@ fn generate_pawn_capture_moves_from_direction<D: StaticPlayer>(
 
         if !(en_passant_captured & masks.capture_mask).is_empty() ||
                 !(en_passant_target & masks.push_mask).is_empty() {
-            // Check for horizontal pins of both pawns simultaneously.
+            // Check whether taking en passant would give check.
+            // TODO this is slow. fine for now as en passant is rare, but could
+            // be improved in the future.
 
-            let own_pieces = board.of_player(player);
-            let own_king_singleton = board.of_kind(Piece::King) & own_pieces;
-
-            if !(own_king_singleton & D::FIFTH_RANK).is_empty() {
-                let opponent_orthogonal_sliders = (board.of_kind(Piece::Rook) |
-                    board.of_kind(Piece::Queen)) & opponent_pieces;
-                let occupancy = (own_pieces | opponent_pieces) -
-                    source_singleton - en_passant_captured;
-
-                if !(opponent_orthogonal_sliders & D::FIFTH_RANK).is_empty() {
-                    for opponent_orthogonal_slider in
-                            opponent_orthogonal_sliders.locations() {
-                        let attack = get_rook_attack(occupancy,
-                            opponent_orthogonal_slider);
-
-                        if !(attack & own_king_singleton).is_empty() {
-                            return;
-                        }
-                    }
-                }
-            }
-
-            moves.push(Move::EnPassant {
+            let mov = Move::EnPassant {
                 delta_mask: source_singleton | en_passant_target,
                 target: en_passant_captured
+            };
+            let mut position = position.clone();
+            position.make_move(&mov);
+
+            let any_king_captures = list_moves(&position).iter().any(|m| {
+                match m {
+                    &Move::Ordinary { captured, .. } |
+                    &Move::Promotion { captured, .. } =>
+                        captured == Some(Piece::King),
+                    _ => false
+                }
             });
+
+            if !any_king_captures {
+                moves.push(mov);
+            }
         }
     }
 }
 
-fn generate_pawn_capture_moves(moves: &mut Vec<Move>, board: &Board,
+fn generate_pawn_capture_moves(moves: &mut Vec<Move>, position: &Position,
         player: Player, source_singleton: Bitboard,
         en_passant_target: Bitboard, masks: &CheckEvasionMasks) {
     match player {
         Player::White =>
             generate_pawn_capture_moves_from_direction::<White>(
-                moves, board, player, source_singleton, en_passant_target,
+                moves, position, player, source_singleton, en_passant_target,
                 masks),
         Player::Black =>
             generate_pawn_capture_moves_from_direction::<Black>(
-                moves, board, player, source_singleton, en_passant_target,
+                moves, position, player, source_singleton, en_passant_target,
                 masks)
     }
 }
@@ -703,7 +700,7 @@ pub fn list_moves(position: &Position) -> Vec<Move> {
     let mask = masks.union();
 
     let pinned =
-        generate_pin_moves(&mut moves, board, en_passant_target, turn, &masks);
+        generate_pin_moves(&mut moves, position, en_passant_target, turn, &masks);
 
     let pawns = board.of_player_and_kind(turn, Piece::Pawn) - pinned;
     let knights = board.of_player_and_kind(turn, Piece::Knight) - pinned;
@@ -714,7 +711,7 @@ pub fn list_moves(position: &Position) -> Vec<Move> {
     for pawn_singleton in pawns.singletons() {
         generate_pawn_push_moves(
             &mut moves, board, turn, pawn_singleton, mask);
-        generate_pawn_capture_moves(&mut moves, board, turn, pawn_singleton,
+        generate_pawn_capture_moves(&mut moves, position, turn, pawn_singleton,
             en_passant_target, &masks);
     }
 
@@ -1971,6 +1968,44 @@ mod tests {
     }
 
     #[test]
+    fn diagonally_indirectly_pinned_pawn_cannot_take_en_passant() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │ b │ k │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ P │ p │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ K │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // Where the black pawn on d5 just moved two squares. The bishop on f7
+        // would give check to white if the pawn on d5 were taken en passant.
+
+        let fen = "8/5bk1/8/2Pp4/8/1K6/8/8 w - d6 0 1";
+        let position = Position::from_fen(fen).unwrap();
+        let moves_from_c5 = list_moves_from(&position, Location(34));
+        let expected_moves = vec![
+            Move::Ordinary {
+                moved: Piece::Pawn,
+                captured: None,
+                delta_mask: Bitboard(0x0000040400000000)
+            }
+        ];
+
+        assert_set_equals(expected_moves, moves_from_c5);
+    }
+
+    #[test]
     fn pinned_knight_cannot_move() {
         // Board (black to move):
         // ┌───┬───┬───┬───┬───┬───┬───┬───┐
@@ -2635,5 +2670,48 @@ mod tests {
         ];
 
         assert_set_equals(expected_moves, moves_from_e8);
+    }
+
+    #[test]
+    fn bug_fix_1() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ q │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │ P │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ K │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ n │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │ k │   │   │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // Due to a bug, the white pawn previously could not capture the queen.
+        // This test case ensures that the bug does not occur again.
+
+        let fen = "8/q7/1P6/3K4/2n5/8/8/5k2 w - - 3 3";
+        let position = Position::from_fen(fen).unwrap();
+        let moves_from_b6 = list_moves_from(&position, Location(41));
+        let expected_moves = vec![
+            Move::Ordinary {
+                moved: Piece::Pawn,
+                captured: None,
+                delta_mask: Bitboard(0x0002020000000000)
+            },
+            Move::Ordinary {
+                moved: Piece::Pawn,
+                captured: Some(Piece::Queen),
+                delta_mask: Bitboard(0x0001020000000000)
+            }
+        ];
+
+        assert_set_equals(expected_moves, moves_from_b6);
     }
 }
