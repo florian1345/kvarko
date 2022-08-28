@@ -241,7 +241,7 @@ fn compute_king_attackers(board: &Board, player: Player) -> KingAttackers {
                 opponent_pawns
     };
 
-    let location = king_singleton.locations().next().unwrap();
+    let location = king_singleton.min_unchecked();
     let opponent_bishops = opponent_bitboard & board.of_kind(Piece::Bishop);
     let opponent_queens = opponent_bitboard & board.of_kind(Piece::Queen);
     let diagonal_slider_attackers = get_bishop_attack(occupancy, location) &
@@ -341,8 +341,9 @@ fn generate_promotions_from_targets(moves: &mut Vec<Move>, board: &Board,
 /// pins, this does not need to consider push moves, only captures and en
 /// passant.
 fn generate_directional_pin_moves<GetAt, GenPawn>(moves: &mut Vec<Move>,
-    board: &Board, player: Player, mask: Bitboard, get_attack: GetAt,
-    non_queen_slider: Piece, generate_pawn_moves: GenPawn) -> Bitboard
+    board: &Board, player: Player, mask: Bitboard, king_location: Location,
+    get_attack: GetAt, non_queen_slider: Piece, generate_pawn_moves: GenPawn)
+    -> Bitboard
 where
     GetAt: Fn(Bitboard, Location) -> Bitboard,
     GenPawn: Fn(&mut Vec<Move>, Bitboard, Bitboard)
@@ -357,8 +358,6 @@ where
 
     // TODO avoid recomputation (was already done in compute_king_attackers)
 
-    let king_singleton = board.of_player_and_kind(player, Piece::King);
-    let king_location = king_singleton.min_unchecked();
     let occupancy =
         board.of_player(Player::White) | board.of_player(Player::Black);
 
@@ -406,17 +405,17 @@ where
 /// bitboard of all fields on which a pinned piece stands. These can be
 /// excluded for future move generation.
 fn generate_pin_moves(moves: &mut Vec<Move>, position: &Position,
-        en_passant_target: Bitboard, player: Player, masks: &CheckEvasionMasks)
-        -> Bitboard {
+        en_passant_target: Bitboard, player: Player, king_location: Location,
+        masks: &CheckEvasionMasks) -> Bitboard {
     let board = position.board();
     let mask = masks.union();
     let orthogonal_pins = generate_directional_pin_moves(
-        moves, board, player, mask, get_rook_attack, Piece::Rook,
+        moves, board, player, mask, king_location, get_rook_attack, Piece::Rook,
         |moves, pawn_singleton, mask|
             generate_pawn_push_moves(
                 moves, board, player, pawn_singleton, masks.push_mask & mask));
     let diagonal_pins = generate_directional_pin_moves(
-        moves, board, player, mask, get_bishop_attack, Piece::Bishop,
+        moves, board, player, mask, king_location, get_bishop_attack, Piece::Bishop,
             |moves, pawn_singleton, mask|
                 generate_pawn_capture_moves(moves, position, player,
                     pawn_singleton, en_passant_target,
@@ -428,12 +427,12 @@ fn generate_pin_moves(moves: &mut Vec<Move>, position: &Position,
     orthogonal_pins | diagonal_pins
 }
 
+#[inline]
 fn generate_ordinary_king_moves(moves: &mut Vec<Move>, board: &Board,
-        player: Player, opponent_attack: Bitboard) {
+        player: Player, opponent_attack: Bitboard, king_singleton: Bitboard,
+        king_location: Location) {
     // TODO avoid recomputation (was already done in compute_king_attackers)
 
-    let king_singleton = board.of_player_and_kind(player, Piece::King);
-    let king_location = king_singleton.locations().next().unwrap();
     let targets = get_king_attack(king_location) & !board.of_player(player) &
         !opponent_attack;
 
@@ -661,7 +660,8 @@ pub fn list_moves_in(position: &Position, moves: &mut Vec<Move>) -> bool {
     let opponent_attack = compute_opponent_attack_mask(position);
     let king_attackers = compute_king_attackers(board, turn);
 
-    generate_ordinary_king_moves(moves, board, turn, opponent_attack);
+    generate_ordinary_king_moves(moves, board, turn, opponent_attack,
+        king_singleton, king_location);
 
     if king_attackers.all.len() > 1 {
         // Double check => only the king can move.
@@ -708,7 +708,8 @@ pub fn list_moves_in(position: &Position, moves: &mut Vec<Move>) -> bool {
     let mask = masks.union();
 
     let pinned =
-        generate_pin_moves(moves, position, en_passant_target, turn, &masks);
+        generate_pin_moves(moves, position, en_passant_target, turn, 
+            king_location, &masks);
 
     let pawns = board.of_player_and_kind(turn, Piece::Pawn) - pinned;
     let knights = board.of_player_and_kind(turn, Piece::Knight) - pinned;
