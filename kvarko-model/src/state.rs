@@ -265,6 +265,11 @@ impl Position {
         self.turn
     }
 
+    pub fn set_turn(&mut self, turn: Player) {
+        self.turn = turn;
+        self.en_passant_file = usize::MAX;
+    }
+
     fn apply_ordinary_move<P>(&mut self, moved: Piece, captured: Option<Piece>,
         delta_mask: Bitboard)
     where
@@ -680,6 +685,48 @@ impl State {
         self.position.unmake_move(mov, revert_info.position_revert_info);
     }
 
+    pub fn is_stateful_draw(&self) -> bool {
+        if self.fifty_move_clock >= rules::DRAW_NO_PROGRESS_COUNT {
+            // Draw by fifty-move rule
+
+            return true;
+        }
+
+        let mut repetitions = 1;
+
+        for old_position in self.reversible_history() {
+            if old_position == &self.position {
+                repetitions += 1;
+
+                if repetitions == rules::DRAW_REPETITION_COUNT {
+                    // Draw by repetition
+
+                    return true;
+                }
+            }
+        }
+
+        let board = self.position.board();
+
+        if (board.of_kind(Piece::Pawn) | board.of_kind(Piece::Rook) |
+                board.of_kind(Piece::Queen)).is_empty() {
+            let knights = board.of_kind(Piece::Knight);
+            let bishops = board.of_kind(Piece::Bishop);
+            let insufficient_material =
+                (knights.len() == 1 && bishops.is_empty()) ||
+                (knights.is_empty() && (bishops.is_subset(LIGHT_SQUARES) ||
+                    bishops.is_subset(DARK_SQUARES)));
+
+            if insufficient_material {
+                // Draw by insufficient material
+
+                return true;
+            }
+        }
+
+        false
+    }
+
     /// Check whether this state constitutes an end state of the game and, if
     /// so, determines the outcome.
     ///
@@ -701,45 +748,12 @@ impl State {
             }
         }
 
-        if self.fifty_move_clock >= rules::DRAW_NO_PROGRESS_COUNT {
-            // Draw by fifty-move rule
-
-            return Some(Outcome::Draw);
+        if self.is_stateful_draw() {
+            Some(Outcome::Draw)
         }
-
-        let mut repetitions = 1;
-
-        for old_position in self.reversible_history() {
-            if old_position == &self.position {
-                repetitions += 1;
-
-                if repetitions == rules::DRAW_REPETITION_COUNT {
-                    // Draw by repetition
-
-                    return Some(Outcome::Draw);
-                }
-            }
+        else {
+            None
         }
-
-        let board = self.position.board();
-
-        if (board.of_kind(Piece::Pawn) | board.of_kind(Piece::Rook) |
-                board.of_kind(Piece::Queen)).is_empty() {
-            let knights = board.of_kind(Piece::Knight);
-            let bishops = board.of_kind(Piece::Bishop);
-            let insufficient_material =
-                (knights.len() == 1 && bishops.is_empty()) ||
-                (knights.is_empty() && (bishops.is_subset(LIGHT_SQUARES) ||
-                    bishops.is_subset(DARK_SQUARES)));
-
-            if insufficient_material {
-                // Draw by insufficient material
-
-                return Some(Outcome::Draw);
-            }
-        }
-
-        None
     }
 
     /// Converts the current state into a FEN string in the format defined in

@@ -7,5 +7,6 @@ edition = "2021"
 
 [dependencies]
 ggez = "0.7"
+kvarko-engine = { path = "../kvarko-engine" }
 kvarko-model = { path = "../kvarko-model" }
 tokio = { version = "1.18", features = [ "sync" ] }

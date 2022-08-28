@@ -143,7 +143,7 @@ impl Iterator for BitboardSingletonIter {
 /// subset operation, i.e. `a <= b` if `a` is a subset of `b` or `a > b` if `a`
 /// is a proper superset of `b`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Bitboard(pub(crate) u64);
+pub struct Bitboard(pub u64);
 
 impl Bitboard {
 

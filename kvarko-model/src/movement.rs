@@ -635,20 +635,7 @@ fn generate_castle_moves(moves: &mut Vec<Move>, position: &Position,
     }
 }
 
-/// Returns a list of all legal moves that are available in a given position,
-/// according to all the rules of chess. The active player is taken from the
-/// position.
-///
-/// # Arguments
-///
-/// * `position`: The [Position] from which to list all legal moves.
-///
-/// # Returns
-///
-/// A new [Vec] containing all legal [Move]s, in no particular order. As a
-/// second return parameter, a flag whether the player whose move it is is
-/// currently in check.
-pub fn list_moves(position: &Position) -> (Vec<Move>, bool) {
+pub fn list_moves_in(position: &Position, moves: &mut Vec<Move>) -> bool {
     let turn = position.turn();
     let board = position.board();
     let en_passant_target = if let Some(en_passant_file) =
@@ -668,19 +655,18 @@ pub fn list_moves(position: &Position) -> (Vec<Move>, bool) {
     };
     let occupancy =
         board.of_player(Player::White) | board.of_player(Player::Black);
-    let mut moves = Vec::new();
 
     let king_singleton = board.of_player_and_kind(turn, Piece::King);
     let king_location = king_singleton.locations().next().unwrap();
     let opponent_attack = compute_opponent_attack_mask(position);
     let king_attackers = compute_king_attackers(board, turn);
 
-    generate_ordinary_king_moves(&mut moves, board, turn, opponent_attack);
+    generate_ordinary_king_moves(moves, board, turn, opponent_attack);
 
     if king_attackers.all.len() > 1 {
         // Double check => only the king can move.
 
-        return (moves, true);
+        return true;
     }
 
     let mut capture_mask = Bitboard::FULL;
@@ -712,7 +698,7 @@ pub fn list_moves(position: &Position) -> (Vec<Move>, bool) {
         }
     }
     else {
-        generate_castle_moves(&mut moves, position, turn, opponent_attack);
+        generate_castle_moves(moves, position, turn, opponent_attack);
     }
 
     let masks = CheckEvasionMasks {
@@ -722,7 +708,7 @@ pub fn list_moves(position: &Position) -> (Vec<Move>, bool) {
     let mask = masks.union();
 
     let pinned =
-        generate_pin_moves(&mut moves, position, en_passant_target, turn, &masks);
+        generate_pin_moves(moves, position, en_passant_target, turn, &masks);
 
     let pawns = board.of_player_and_kind(turn, Piece::Pawn) - pinned;
     let knights = board.of_player_and_kind(turn, Piece::Knight) - pinned;
@@ -732,28 +718,48 @@ pub fn list_moves(position: &Position) -> (Vec<Move>, bool) {
 
     for pawn_singleton in pawns.singletons() {
         generate_pawn_push_moves(
-            &mut moves, board, turn, pawn_singleton, mask);
-        generate_pawn_capture_moves(&mut moves, position, turn, pawn_singleton,
+            moves, board, turn, pawn_singleton, mask);
+        generate_pawn_capture_moves(moves, position, turn, pawn_singleton,
             en_passant_target, &masks);
     }
 
     for knight in knights.locations() {
-        generate_knight_moves(&mut moves, board, turn, mask, knight);
+        generate_knight_moves(moves, board, turn, mask, knight);
     }
 
     for bishop in bishops.locations() {
-        generate_bishop_moves(&mut moves, board, turn, mask, bishop);
+        generate_bishop_moves(moves, board, turn, mask, bishop);
     }
 
     for rook in rooks.locations() {
-        generate_rook_moves(&mut moves, board, turn, mask, rook);
+        generate_rook_moves(moves, board, turn, mask, rook);
     }
 
     for queen in queens.locations() {
-        generate_queen_moves(&mut moves, board, turn, mask, queen);
+        generate_queen_moves(moves, board, turn, mask, queen);
     }
 
-    (moves, !king_attackers.all.is_empty())
+    !king_attackers.all.is_empty()
+}
+
+/// Returns a list of all legal moves that are available in a given position,
+/// according to all the rules of chess. The active player is taken from the
+/// position.
+///
+/// # Arguments
+///
+/// * `position`: The [Position] from which to list all legal moves.
+///
+/// # Returns
+///
+/// A new [Vec] containing all legal [Move]s, in no particular order. As a
+/// second return parameter, a flag whether the player whose move it is is
+/// currently in check.
+pub fn list_moves(position: &Position) -> (Vec<Move>, bool) {
+    let mut moves = Vec::new();
+    let check = list_moves_in(position, &mut moves);
+
+    (moves, check)
 }
 
 #[cfg(test)]
@@ -763,6 +769,10 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn arg() {
+        panic!("Size: {}", std::mem::size_of::<Move>());
+    }
     #[test]
     fn rook_attack_1() {
         // Board (R = rook, X = occupied):

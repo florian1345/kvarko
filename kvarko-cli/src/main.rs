@@ -3,7 +3,7 @@ use crate::args::{Args, Command};
 use clap::Parser;
 
 use kvarko_model::error::FenError;
-use kvarko_model::movement;
+use kvarko_model::movement::{self, Move};
 use kvarko_model::state::State;
 
 use std::time::Instant;
@@ -11,20 +11,23 @@ use std::time::Instant;
 mod args;
 
 fn perft(fen: &str, depth: usize) -> Result<usize, FenError> {
-    fn perft_rec(state: &mut State, depth: usize) -> usize {
+    fn perft_rec(state: &mut State, depth: usize, moves: &mut Vec<Move>)
+            -> usize {
         if depth == 0 {
             return 1;
         }
     
         if depth == 1 {
-            return movement::list_moves(state.position()).0.len();
+            moves.clear();
+            movement::list_moves_in(state.position(), moves);
+            return moves.len();
         }
     
         let mut sum = 0;
     
         for mov in movement::list_moves(state.position()).0 {
             let revert_info = state.make_move(&mov);
-            sum += perft_rec(state, depth - 1);
+            sum += perft_rec(state, depth - 1, moves);
             state.unmake_move(&mov, revert_info);
         }
     
@@ -32,7 +35,9 @@ fn perft(fen: &str, depth: usize) -> Result<usize, FenError> {
     }
 
     let mut state = State::from_fen(fen)?;
-    Ok(perft_rec(&mut state, depth))
+    let mut moves = Vec::new();
+
+    Ok(perft_rec(&mut state, depth, &mut moves))
 }
 
 fn main() {

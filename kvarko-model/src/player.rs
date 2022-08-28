@@ -8,7 +8,7 @@ use std::mem;
 
 /// An enumeration of the two different players. This can be converted to a
 /// [usize] to obtain the player index.
-#[repr(usize)]
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Player {
 
@@ -82,7 +82,7 @@ impl Player {
     /// [Player::White] if this player is black, and [Player::Black] otherwise.
     pub fn opponent(self) -> Player {
         unsafe {
-            mem::transmute(1 - self as usize)
+            mem::transmute(1 - self as u8)
         }
     }
 

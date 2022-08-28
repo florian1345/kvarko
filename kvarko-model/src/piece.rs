@@ -6,7 +6,7 @@ use crate::error::{FenResult, FenError};
 /// An enumeration of the different kinds of pieces on the board. Does not
 /// encode the [Player] who owns the piece. This can be converted to a [usize]
 /// to obtain the piece index.
-#[repr(usize)]
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Piece {
 
