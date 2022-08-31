@@ -2,7 +2,11 @@
 //! can make in a given position. It also contains a move generation algorithm
 //! accessible through the function [list_moves].
 
+use std::iter::Peekable;
+use std::str::Chars;
+
 use crate::board::{Bitboard, Location, Board};
+use crate::error::{AlgebraicResult, AlgebraicError};
 use crate::piece::Piece;
 use crate::player::{Black, CastleInfo, Player, StaticPlayer, White};
 use crate::rules::PROMOTABLE;
@@ -62,6 +66,162 @@ fn get_knight_attack(square: Location) -> Bitboard {
 
 fn get_king_attack(square: Location) -> Bitboard {
     KING_ATTACK_MASKS[square.0]
+}
+
+enum AlgebraicMove {
+    Ordinary {
+        moved: Piece,
+        src_file: Option<usize>,
+        src_rank: Option<usize>,
+        dest: Location,
+        captures: bool,
+        // check: bool,
+        // mate: bool,
+        promotion: Option<Piece>
+    },
+    Castle {
+        long: bool
+    }
+}
+
+fn parse_complete_or_not_final_position(chars: &mut Peekable<Chars>)
+        -> AlgebraicResult<(Option<usize>, Option<usize>)> {
+    let mut file = None;
+    let mut rank = None;
+
+    match chars.peek() {
+        Some(&c) if c >= 'a' && c <= 'h' => {
+            file = Some(c as usize - 'a' as usize);
+            chars.next();
+            
+            let c = *chars.peek()
+                .ok_or(AlgebraicError::IncompleteDestination)?;
+
+            if c >= '1' && c <= '8' {
+                rank = Some(c as usize - '1' as usize);
+                chars.next();
+            }
+        },
+        Some(&c) if c >= '1' && c <= '8' => {
+            rank = Some(c as usize - '1' as usize);
+            chars.next();
+        },
+        Some(_) => { },
+        None => return Err(AlgebraicError::MissingDestination)
+    }
+
+    Ok((file, rank))
+}
+
+impl AlgebraicMove {
+    fn parse(algebraic: &str) -> AlgebraicResult<AlgebraicMove> {
+        if algebraic == "O-O" {
+            return Ok(AlgebraicMove::Castle {
+                long: false
+            });
+        }
+        else if algebraic == "O-O-O" {
+            return Ok(AlgebraicMove::Castle {
+                long: true
+            });
+        }
+
+        let mut chars = algebraic.chars().peekable();
+        let moved = match chars.peek() {
+            Some('N') | Some('♘') | Some('♞') => Piece::Knight,
+            Some('B') | Some('♗') | Some('♝') => Piece::Bishop,
+            Some('R') | Some('♖') | Some('♜') => Piece::Rook,
+            Some('Q') | Some('♕') | Some('♛') => Piece::Queen,
+            Some('K') | Some('♔') | Some('♚') => Piece::King,
+            _ => Piece::Pawn
+        };
+
+        if moved != Piece::Pawn {
+            chars.next();
+        }
+
+        let (mut dest_file, mut dest_rank) =
+            parse_complete_or_not_final_position(&mut chars)?;
+        let mut captures = false;
+
+        if chars.peek() == Some(&'x') {
+            captures = true;
+            chars.next();
+        }
+
+        let mut src_file = None;
+        let mut src_rank = None;
+
+        // TODO use if-let chain
+
+        if let Some(&c) = chars.peek() {
+            if c >= 'a' && c <= 'h' {
+                src_file = dest_file;
+                src_rank = dest_rank;
+                (dest_file, dest_rank) =
+                    parse_complete_or_not_final_position(&mut chars)?;
+            }
+            else if captures {
+                return Err(AlgebraicError::MissingDestination);
+            }
+        }
+        else if captures {
+            return Err(AlgebraicError::MissingDestination);
+        }
+
+        let mut promotion = None;
+
+        if chars.peek() == Some(&'=') {
+            chars.next();
+
+            // TODO avoid code duplication
+
+            promotion = Some(match chars.next() {
+                Some('N') | Some('♘') | Some('♞') => Piece::Knight,
+                Some('B') | Some('♗') | Some('♝') => Piece::Bishop,
+                Some('R') | Some('♖') | Some('♜') => Piece::Rook,
+                Some('Q') | Some('♕') | Some('♛') => Piece::Queen,
+                Some(c) => return Err(AlgebraicError::InvalidPromotion(c)),
+                None => return Err(AlgebraicError::MissingPromotion)
+            });
+        }
+
+        // let mut check = false;
+        // let mut mate = false;
+
+        match chars.next() {
+            Some('+') => {
+                // check = true;
+            },
+            Some('#') => {
+                // mate = true;
+            },
+            Some(c) => {
+                return Err(AlgebraicError::InvalidSuffix(c));
+            },
+            None => { }
+        }
+
+        if chars.next().is_some() {
+            return Err(AlgebraicError::ExpectedEnd);
+        }
+
+        if dest_file.is_none() || dest_rank.is_none() {
+            return Err(AlgebraicError::IncompleteDestination);
+        }
+
+        Ok(AlgebraicMove::Ordinary {
+            moved,
+            src_file,
+            src_rank,
+            dest: Location::from_file_and_rank(
+                dest_file.unwrap(), dest_rank.unwrap()).unwrap(),
+            captures,
+            // check,
+            // mate,
+            promotion
+        })
+    }
 }
 
 /// Represents a move made by a single player. In technical Chess terminology,
@@ -126,6 +286,122 @@ pub enum Move {
 }
 
 impl Move {
+
+    /// Parses a move from algebraic notation, which is defined as follows.
+    ///
+    /// * If the move is short castle, the notation is "O-O".
+    /// * If the move is long castle, the notation is "O-O-O".
+    /// * For a pawn push move, write the location of the target square, such
+    /// as "d4".
+    /// * For a pawn capture move, write the source file name followed by "x"
+    /// followed by the target square, such as "dxe5".
+    /// * En passant moves are represented as pawn capture moves, where the
+    /// target square is the one that the pawn moves to, not the opponent's
+    /// pawn.
+    /// * For an ordinary move with a non-pawn piece, write a capital
+    /// representing the piece ("N" for knight, "B" for bishop, ...) first,
+    /// then the target square, such as "Nf3"
+    /// * If the move is a capture, write "x" before the target square, such as
+    /// "Nxf3".
+    /// * If there are multiple possible pieces of the same kind that could
+    /// move to the target, write the file name to disambiguate before the
+    /// target or "x", such as "Rab8". If that is insufficient, write the file
+    /// name or, if that is also ambiguous, the entire source square name, such
+    /// as "Nc3xd5".
+    /// * If the move gives check, suffix it with "+".
+    /// * If the moves gives check-mate, suffix it with "#".
+    /// * If the move is a promotion, suffix it with "=" followed by a capital
+    /// representing the piece to which is promoted ("N" for knight, "B" for
+    /// bishop, ...) such as "axb8=Q". The promotion suffix comes before any
+    /// check/check-mate suffix (example "axb8=Q+").
+    ///
+    /// # Arguments
+    ///
+    /// * `position`: A reference to the [Position] in which the move was made.
+    /// This is important as the same algebraic notation can refer to different
+    /// moves and only with a given position these can be disambiguated.
+    /// * `algebraic`: The algebraic notation to parse.
+    ///
+    /// # Returns
+    ///
+    /// A [Move] which is represented the specified algebraic notation given
+    /// the current position.
+    ///
+    /// # Errors
+    ///
+    /// Any [AlgebraicError] according to their respective documentations.
+    pub fn parse_algebraic(position: &Position, algebraic: &str)
+            -> Result<Move, AlgebraicError> {
+        let moves = list_moves(position).0;
+        let algebraic_move = AlgebraicMove::parse(algebraic)?;
+        let long_castle_info = match position.turn() {
+            Player::White => &White::LONG_CASTLE_INFO,
+            Player::Black => &Black::LONG_CASTLE_INFO
+        };
+        let board = position.board();
+        let own_pieces = board.of_player(position.turn());
+
+        moves.into_iter()
+            .find(|mov| {
+                match algebraic_move {
+                    AlgebraicMove::Ordinary {
+                        moved,
+                        src_file,
+                        src_rank,
+                        dest,
+                        captures,
+                        promotion
+                    } => {
+                        let delta_mask = mov.delta_mask();
+                        let mov_src = (delta_mask & own_pieces).min_unchecked();
+                        let mov_dest = (delta_mask - own_pieces).min_unchecked();
+
+                        if let Some(promotion) = promotion {
+                            if let &Move::Promotion {
+                                promotion: mov_promotion,
+                                ..
+                            } = mov {
+                                if promotion != mov_promotion {
+                                    return false;
+                                }
+                            }
+                        }
+
+                        if let Some(src_file) = src_file {
+                            if mov_src.file() != src_file {
+                                return false;
+                            }
+                        }
+
+                        if let Some(src_rank) = src_rank {
+                            if mov_src.rank() != src_rank {
+                                return false;
+                            }
+                        }
+
+                        let mov_cap = if let Move::EnPassant { .. } = mov {
+                            true
+                        }
+                        else {
+                            board.player_at(dest).is_some()
+                        };
+
+                        board.piece_at(mov_src) == Some(moved) &&
+                            mov_dest == dest && mov_cap == captures
+                    },
+                    AlgebraicMove::Castle { long } => {
+                        match mov {
+                            &Move::Castle { king_delta_mask, .. } => {
+                                (king_delta_mask ==
+                                    long_castle_info.king_delta_mask) == long
+                            },
+                            _ => false
+                        }
+                    }
+                }
+            })
+            .ok_or(AlgebraicError::NoSuchMove)
+    }
 
     fn delta_mask(&self) -> Bitboard {
         match self {
@@ -768,12 +1044,30 @@ mod tests {
 
     use std::fmt::Debug;
 
+    use crate::state::State;
+
     use super::*;
 
     #[test]
-    fn arg() {
-        panic!("Size: {}", std::mem::size_of::<Move>());
+    fn algebraic_history_results_in_correct_position() {
+        let mut state = State::initial();
+        let history = "e4 d5 exd5 c5 dxc6 bxc6 Nf3 Nd7 Bc4 Bb7 O-O Qc7 Re1 \
+            O-O-O d4 c5 dxc5 Ne5 c6 Ba6 Bxa6+ Kb8 Qxd8+ Qxd8 c7+ Ka8 cxd8=Q#"
+            .split_whitespace();
+
+        for algebraic in history {
+            let mov = Move::parse_algebraic(&state.position(), algebraic)
+                .unwrap();
+
+            state.make_move(&mov);
+        }
+
+        let fen = "k2Q1bnr/p3pppp/B7/4n3/8/5N2/PPP2PPP/RNB1R1K1 b - - 0 14";
+        let expected = Position::from_fen(fen).unwrap();
+
+        assert_eq!(&expected, state.position());
     }
+
     #[test]
     fn rook_attack_1() {
         // Board (R = rook, X = occupied):

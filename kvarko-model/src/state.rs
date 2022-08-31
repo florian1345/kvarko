@@ -17,6 +17,12 @@ pub struct PositionRevertInfo {
     en_passant_file: usize
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PositionId {
+    board_id: [Bitboard; 4],
+    additional_data: u8 // TODO move this into the bitboards somehow
+}
+
 /// All information about the state of the game that does not relate to the
 /// history of the game. That is, this contains the [Board], information
 /// whether players may still castle, information about available en passant
@@ -270,6 +276,23 @@ impl Position {
         self.en_passant_file = usize::MAX;
     }
 
+    pub fn unique_id(&self) -> PositionId {
+        let mut board_id = self.board.unique_id();
+
+        board_id[0] ^= Bitboard(0u64.wrapping_sub(self.long_castles[0] as u64));
+        board_id[1] ^= Bitboard(0u64.wrapping_sub(self.long_castles[1] as u64));
+        board_id[2] ^= Bitboard(0u64.wrapping_sub(self.short_castles[0] as u64));
+        board_id[3] ^= Bitboard(0u64.wrapping_sub(self.short_castles[1] as u64));
+
+        let additional_data =
+            (self.en_passant_file as u8) << 1 | self.turn as u8;
+
+        PositionId {
+            board_id,
+            additional_data
+        }
+    }
+
     fn apply_ordinary_move<P>(&mut self, moved: Piece, captured: Option<Piece>,
         delta_mask: Bitboard)
     where
@@ -466,7 +489,7 @@ pub struct StateRevertInfo {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct State {
     position: Position,
-    history: Vec<Position>,
+    history: Vec<PositionId>,
     last_irreversible: usize,
     fifty_move_clock: usize
 }
@@ -589,7 +612,7 @@ impl State {
     /// position (unless the game is in its initial state), followed by the one
     /// after the first half-move etc. The last position in the slice preceded
     /// the current one. 
-    pub fn history(&self) -> &[Position] {
+    pub fn history(&self) -> &[PositionId] {
         &self.history
     }
 
@@ -601,7 +624,7 @@ impl State {
     ///
     /// A slice containing all previous positions since the last irreversible
     /// move.
-    pub fn reversible_history(&self) -> &[Position] {
+    pub fn reversible_history(&self) -> &[PositionId] {
         &self.history[self.last_irreversible..]
     }
 
@@ -634,7 +657,7 @@ impl State {
     /// move should be reverted.
     pub fn make_move(&mut self, mov: &Move) -> StateRevertInfo {
         let index = self.history.len();
-        self.history.push(self.position.clone());
+        self.history.push(self.position.unique_id());
 
         let position_revert_info = self.position.make_move(mov);
         let revert_info = StateRevertInfo {
@@ -686,22 +709,30 @@ impl State {
     }
 
     pub fn is_stateful_draw(&self) -> bool {
+        const MIN_LEN_FOR_REPETITION: usize =
+            (rules::DRAW_REPETITION_COUNT - 1) * 4;
+
         if self.fifty_move_clock >= rules::DRAW_NO_PROGRESS_COUNT {
             // Draw by fifty-move rule
 
             return true;
         }
 
-        let mut repetitions = 1;
+        let reversible_history = self.reversible_history();
 
-        for old_position in self.reversible_history() {
-            if old_position == &self.position {
-                repetitions += 1;
-
-                if repetitions == rules::DRAW_REPETITION_COUNT {
-                    // Draw by repetition
-
-                    return true;
+        if reversible_history.len() >= MIN_LEN_FOR_REPETITION {
+            let mut repetitions = 1;
+            let position_id = self.position.unique_id();
+    
+            for old_position in reversible_history {
+                if old_position == &position_id {
+                    repetitions += 1;
+    
+                    if repetitions == rules::DRAW_REPETITION_COUNT {
+                        // Draw by repetition
+    
+                        return true;
+                    }
                 }
             }
         }

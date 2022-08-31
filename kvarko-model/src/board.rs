@@ -473,6 +473,15 @@ impl Board {
         }
     }
 
+    pub fn unique_id(&self) -> [Bitboard; 4] {
+        [
+            self.players[0],
+            self.pieces[0] | self.pieces[1] | self.pieces[2],
+            self.pieces[0] | self.pieces[3] | self.pieces[4],
+            self.pieces[2] | self.pieces[3] | self.pieces[5]
+        ]
+    }
+
     /// Gets a bitboard containing the fields on which a piece of the given
     /// player stands.
     ///

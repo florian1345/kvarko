@@ -10,13 +10,21 @@ pub(crate) enum Command {
 
         /// The FEN describing the initial position/root node of the search
         /// tree.
-        #[clap(short, long, default_value =
+        #[clap(long, default_value =
             "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")]
         fen: String,
 
         /// The depth to which paths are searched.
-        #[clap(short, long)]
+        #[clap(long)]
         depth: usize
+    },
+
+    Eval {
+        #[clap(long, default_value = "")]
+        history: String,
+
+        #[clap(long)]
+        depth: u32
     }
 }
 

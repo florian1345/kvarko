@@ -259,3 +259,61 @@ impl Error for BuildGameError { }
 
 /// Syntactic sugar for `Result<T, BuildGameError>`.
 pub type BuildGameResult<T = ()> = Result<T, BuildGameError>;
+
+/// An enumeration of errors that can occur when handling algebraic move
+/// notations.
+#[derive(Clone, Debug)]
+pub enum AlgebraicError {
+
+    /// There is no specifier for the target square.
+    MissingDestination,
+
+    /// The target square specifier is incomplete (rank is missing).
+    IncompleteDestination,
+
+    /// The move was suffixed by a charater that was not recognized (i.e. not
+    /// "+" or "#").
+    InvalidSuffix(char),
+
+    /// After the move, including suffixes, there were still characters in the
+    /// algebraic notation.
+    ExpectedEnd,
+
+    /// The move contained a promotion specifier with a piece character that
+    /// could not be resolved to any piece kind.
+    InvalidPromotion(char),
+
+    /// The algebraic notation ends after the "=" sign of a promotion
+    /// specifier.
+    MissingPromotion,
+
+    /// There is no move satisfying the given algebraic notation in the current
+    /// position.
+    NoSuchMove
+}
+
+impl Display for AlgebraicError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            AlgebraicError::MissingDestination =>
+                write!(f, "missing destination"),
+            AlgebraicError::IncompleteDestination =>
+                write!(f, "missing destination rank or file"),
+            AlgebraicError::InvalidSuffix(c) =>
+                write!(f, "invalid suffix beginning with `{}`", c),
+            AlgebraicError::ExpectedEnd =>
+                write!(f, "unexpected text after end"),
+            AlgebraicError::InvalidPromotion(c) =>
+                write!(f, "invalid promotion specifier: `{}`", c),
+            AlgebraicError::MissingPromotion =>
+                write!(f, "missing promotion specifier"),
+            AlgebraicError::NoSuchMove =>
+                write!(f, "no available move matches algebraic notation")
+        }
+    }
+}
+
+impl Error for AlgebraicError { }
+
+/// Syntactic sugar for `Result<T, AlgebraicError>`.
+pub type AlgebraicResult<T = ()> = Result<T, AlgebraicError>;

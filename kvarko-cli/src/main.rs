@@ -2,7 +2,9 @@ use crate::args::{Args, Command};
 
 use clap::Parser;
 
-use kvarko_model::error::FenError;
+use kvarko_engine::StateEvaluator;
+
+use kvarko_model::error::{FenError, AlgebraicError};
 use kvarko_model::movement::{self, Move};
 use kvarko_model::state::State;
 
@@ -40,6 +42,18 @@ fn perft(fen: &str, depth: usize) -> Result<usize, FenError> {
     Ok(perft_rec(&mut state, depth, &mut moves))
 }
 
+fn eval(history: &str, depth: u32) -> Result<f32, AlgebraicError> {
+    let mut state = State::initial();
+
+    for algebraic in history.split_whitespace() {
+        let mov = Move::parse_algebraic(state.position(), algebraic)?;
+        state.make_move(&mov);
+    }
+
+    let mut engine = kvarko_engine::kvarko_engine(depth);
+    Ok(engine.evaluate_state(&state, &mut Vec::new()))
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -59,6 +73,22 @@ fn main() {
                 },
                 Err(e) => {
                     eprintln!("Error with FEN: {}", e);
+                }
+            }
+        },
+        Command::Eval { history, depth } => {
+            let before = Instant::now();
+
+            match eval(&history, depth) {
+                Ok(v) => {
+                    let after = Instant::now();
+                    let runtime = (after - before).as_secs_f64();
+
+                    println!("Evaluation: {}", v);
+                    println!("Runtime: {:.03} s", runtime);
+                },
+                Err(e) => {
+                    eprintln!("Error with algebraic notation: {}", e);
                 }
             }
         }
