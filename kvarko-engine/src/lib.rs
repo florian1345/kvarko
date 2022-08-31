@@ -24,8 +24,30 @@ impl Ord for OrdF32 {
     }
 }
 
+/// A trait for types which can give an evaluation for a game [State], that is,
+/// a number representing how good the state is for the player whose turn it
+/// is.
 pub trait StateEvaluator {
-    fn evaluate_state(&mut self, state: &State, moves: &mut Vec<Move>) -> f32;
+
+    /// Provides an evaluation for the given state from the player's
+    /// perspective whose turn it currently is.
+    ///
+    /// # Arguments
+    ///
+    /// * `state`: A reference to the current game [State]. This also contains
+    /// information about the player whose turn it is.
+    /// * `moves`: A buffer to use for storing any [Move]s that may be
+    /// generated during the evaluation. Using this buffer avoids reallocation.
+    ///
+    /// # Returns
+    ///
+    /// As a first return parameter, this function returns an evaluation of the
+    /// current position, where negative numbers are more probably defeats than
+    /// victories and positive numbers are more probably victories than
+    /// defeats. The optional second return parameter contains a recommended
+    /// move.
+    fn evaluate_state(&mut self, state: &State, moves: &mut Vec<Move>)
+        -> (f32, Option<Move>);
 }
 
 const DEFAULT_MATERIAL_VALUES: [f32; 6] = [
@@ -98,9 +120,10 @@ impl Default for KvarkoBaseEvaluator {
 
 impl StateEvaluator for KvarkoBaseEvaluator {
 
-    fn evaluate_state(&mut self, state: &State, moves: &mut Vec<Move>) -> f32 {
+    fn evaluate_state(&mut self, state: &State, moves: &mut Vec<Move>)
+            -> (f32, Option<Move>) {
         if state.is_stateful_draw() {
-            return 0.0;
+            return (0.0, None);
         }
 
         let turn = state.position().turn();
@@ -109,10 +132,10 @@ impl StateEvaluator for KvarkoBaseEvaluator {
 
         if moves.is_empty() {
             if check {
-                return f32::NEG_INFINITY;
+                return (f32::NEG_INFINITY, None);
             }
             else {
-                return 0.0;
+                return (0.0, None);
             }
         }
 
@@ -145,7 +168,7 @@ impl StateEvaluator for KvarkoBaseEvaluator {
             value += self.doubled_pawn_penalty * (opponent_pawns as f32 - 1.0);
         }
 
-        value
+        (value, None)
     }
 }
 
@@ -171,13 +194,13 @@ fn estimate_move(mov: &Move) -> OrdF32 {
             if let Some(captured) = captured {
                 let cap_value = DEFAULT_MATERIAL_VALUES[captured as usize];
                 let piece_value = DEFAULT_MATERIAL_VALUES[moved as usize];
-                OrdF32(cap_value / piece_value)
+                OrdF32(-cap_value / piece_value)
             }
             else {
                 OrdF32(0.0)
             }
         },
-        Move::EnPassant { .. } => return OrdF32(1.0),
+        Move::EnPassant { .. } => return OrdF32(-1.0),
         &Move::Promotion { promotion, captured, .. } => {
             let mut value = DEFAULT_MATERIAL_VALUES[promotion as usize];
 
@@ -185,7 +208,7 @@ fn estimate_move(mov: &Move) -> OrdF32 {
                 value += DEFAULT_MATERIAL_VALUES[captured as usize];
             }
 
-            OrdF32(value)
+            OrdF32(-value)
         },
         Move::Castle { .. } => OrdF32(0.0)
     }
@@ -194,13 +217,14 @@ fn estimate_move(mov: &Move) -> OrdF32 {
 impl<E: StateEvaluator> TreeSearchEvaluator<E> {
 
     fn evaluate_rec(&mut self, state: &mut State,
-            bufs: &mut [Vec<Move>], alpha: f32, beta: f32) -> f32 {
+            bufs: &mut [Vec<Move>], mut alpha: f32, beta: f32)
+            -> (f32, Option<Move>) {
         if bufs.len() == 1 {
             self.base_evaluator.evaluate_state(state, &mut bufs[0])
         }
         else if state.is_stateful_draw() {
             // Checkmate is covered later
-            0.0
+            (0.0, None)
         }
         else {
             let (moves, bufs_rest) = bufs.split_first_mut().unwrap();
@@ -209,38 +233,44 @@ impl<E: StateEvaluator> TreeSearchEvaluator<E> {
 
             if moves.is_empty() {
                 if check {
-                    return f32::NEG_INFINITY;
+                    return (f32::NEG_INFINITY, None);
                 }
                 else {
-                    return 0.0;
+                    return (0.0, None);
                 }
             }
 
             moves.sort_by_cached_key(|m| estimate_move(m));
-            let mut max = alpha;
+            let mut max = f32::NEG_INFINITY;
+            let mut max_move = None;
 
             for mov in moves {
                 let revert_info = state.make_move(&mov);
-                let value = -self.evaluate_rec(state, bufs_rest, -beta, -max);
+                let value =
+                    -self.evaluate_rec(state, bufs_rest, -beta, -alpha).0;
                 state.unmake_move(&mov, revert_info);
 
-                if value >= max {
+                if value > max {
                     max = value;
+                    max_move = Some(mov);
+                }
 
-                    if max >= beta {
-                        break;
-                    }
+                alpha = alpha.max(max);
+
+                if alpha >= beta {
+                    break;
                 }
             }
 
-            max
+            (max, max_move.cloned())
         }
     }
 }
 
 impl<E: StateEvaluator> StateEvaluator for TreeSearchEvaluator<E> {
 
-    fn evaluate_state(&mut self, state: &State, _: &mut Vec<Move>) -> f32 {
+    fn evaluate_state(&mut self, state: &State, _: &mut Vec<Move>)
+            -> (f32, Option<Move>) {
         let mut state = state.clone();
         let mut bufs = iter::repeat_with(Vec::new)
             .take(self.search_depth as usize + 1)
@@ -253,7 +283,8 @@ pub struct StateEvaluatingController<E>(E);
 
 impl<E: StateEvaluator> StateEvaluator for StateEvaluatingController<E> {
 
-    fn evaluate_state(&mut self, state: &State, moves: &mut Vec<Move>) -> f32 {
+    fn evaluate_state(&mut self, state: &State, moves: &mut Vec<Move>)
+            -> (f32, Option<Move>) {
         self.0.evaluate_state(state, moves)
     }
 }
@@ -262,11 +293,16 @@ impl<E: StateEvaluator> Controller for StateEvaluatingController<E> {
 
     fn make_move(&mut self, state: &State) -> Move {
         let mut moves = Vec::new();
+
+        if let Some(mov) = self.0.evaluate_state(state, &mut moves).1 {
+            return mov;
+        }
+
         movement::list_moves(state.position()).0.into_iter()
             .max_by_key(|mov| {
                 let mut state = state.clone();
                 state.make_move(mov);
-                OrdF32(-self.0.evaluate_state(&state, &mut moves))
+                OrdF32(-self.0.evaluate_state(&state, &mut moves).0)
             })
             .unwrap()
     }

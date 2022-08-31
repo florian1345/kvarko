@@ -42,7 +42,8 @@ fn perft(fen: &str, depth: usize) -> Result<usize, FenError> {
     Ok(perft_rec(&mut state, depth, &mut moves))
 }
 
-fn eval(history: &str, depth: u32) -> Result<f32, AlgebraicError> {
+fn eval(history: &str, depth: u32)
+        -> Result<(f32, Option<Move>), AlgebraicError> {
     let mut state = State::initial();
 
     for algebraic in history.split_whitespace() {
@@ -80,7 +81,7 @@ fn main() {
             let before = Instant::now();
 
             match eval(&history, depth) {
-                Ok(v) => {
+                Ok((v, _mov)) => {
                     let after = Instant::now();
                     let runtime = (after - before).as_secs_f64();
 

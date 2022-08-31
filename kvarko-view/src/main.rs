@@ -38,7 +38,7 @@ fn main() -> GameResult {
     thread::spawn(|| {
         let mut game = GameBuilder::new()
             .with_observer(view_observer)
-            .with_white(kvarko_engine::kvarko_engine(4))
+            .with_white(kvarko_engine::kvarko_engine(6))
             .with_black(human_controller)
             .build()
             .unwrap();
