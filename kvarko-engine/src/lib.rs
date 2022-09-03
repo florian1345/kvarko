@@ -54,7 +54,7 @@ pub trait StateEvaluator {
 }
 
 pub trait BaseEvaluator {
-    fn evaluate_state(&mut self, state: &mut State, alpha: f32, beta: f32) -> f32;
+    fn evaluate_state(&mut self, state: &mut State, alpha: f32, beta: f32, moves: Option<usize>, check: Option<bool>) -> f32;
 }
 
 const CHECKMATE_DELTA: f32 = 1_000_000.0;
@@ -164,13 +164,19 @@ impl Default for KvarkoBaseEvaluator {
 
 impl BaseEvaluator for KvarkoBaseEvaluator {
 
-    fn evaluate_state(&mut self, state: &mut State, _: f32, _: f32) -> f32 {
+    fn evaluate_state(&mut self, state: &mut State, _: f32, _: f32, moves: Option<usize>, check: Option<bool>) -> f32 {
         if state.is_stateful_draw() {
             return 0.0;
         }
 
         let turn = state.position().turn();
-        let (moves, check) = movement::count_moves(state.position());
+        let (moves, check) =
+            if let (Some(moves), Some(check)) = (moves, check) {
+                (moves, check)
+            }
+            else {
+                movement::count_moves(state.position())
+            };
 
         if moves == 0 {
             if check {
@@ -220,15 +226,16 @@ impl BaseEvaluator for KvarkoBaseEvaluator {
 
 pub trait ListMovesIn {
     fn list_moves_in(&self, position: &Position, moves: &mut Vec<Move>)
-        -> bool;
+        -> (bool, usize);
 }
 
 pub struct ListAllMovesIn;
 
 impl ListMovesIn for ListAllMovesIn {
     fn list_moves_in(&self, position: &Position, moves: &mut Vec<Move>)
-            -> bool {
-        movement::list_moves_in(position, moves)
+            -> (bool, usize) {
+        let check = movement::list_moves_in(position, moves);
+        (check, moves.len())
     }
 }
 
@@ -236,13 +243,15 @@ pub struct ListCapturesIn;
 
 impl ListMovesIn for ListCapturesIn {
     fn list_moves_in(&self, position: &Position, moves: &mut Vec<Move>)
-            -> bool {
+            -> (bool, usize) {
         struct CapturesLister<'a> {
-            moves: &'a mut Vec<Move>
+            moves: &'a mut Vec<Move>,
+            count: usize
         }
 
         impl<'a> MoveProcessor for CapturesLister<'a> {
             fn process(&mut self, mov: Move) {
+                self.count += 1;
                 let capture = match &mov {
                     Move::Ordinary { captured, .. } => captured.is_some(),
                     Move::EnPassant { .. } => true,
@@ -256,9 +265,13 @@ impl ListMovesIn for ListCapturesIn {
             }
         }
 
-        movement::process_moves(position, &mut CapturesLister {
-            moves
-        })
+        let mut processor = CapturesLister {
+            moves,
+            count: 0
+        };
+        let check = movement::process_moves(position, &mut processor);
+
+        (check, processor.count)
     }
 }
 
@@ -266,13 +279,15 @@ pub struct ListNonPawnCapturesIn;
 
 impl ListMovesIn for ListNonPawnCapturesIn {
     fn list_moves_in(&self, position: &Position, moves: &mut Vec<Move>)
-            -> bool {
+            -> (bool, usize) {
         struct NonPawnCapturesLister<'a> {
-            moves: &'a mut Vec<Move>
+            moves: &'a mut Vec<Move>,
+            count: usize
         }
 
         impl<'a> MoveProcessor for NonPawnCapturesLister<'a> {
             fn process(&mut self, mov: Move) {
+                self.count += 1;
                 let captured = match &mov {
                     Move::Ordinary { captured, .. } => captured.clone(),
                     Move::Promotion { captured, .. } => captured.clone(),
@@ -287,9 +302,13 @@ impl ListMovesIn for ListNonPawnCapturesIn {
             }
         }
 
-        movement::process_moves(position, &mut NonPawnCapturesLister {
-            moves
-        })
+        let mut processor = NonPawnCapturesLister {
+            moves,
+            count: 0
+        };
+        let check = movement::process_moves(position, &mut processor);
+
+        (check, processor.count)
     }
 }
 
@@ -318,7 +337,8 @@ where
     E: BaseEvaluator,
     L: ListMovesIn
 {
-    fn evaluate_state(&mut self, state: &mut State, alpha: f32, beta: f32) -> f32 {
+    fn evaluate_state(&mut self, state: &mut State, alpha: f32, beta: f32,
+            _: Option<usize>, _: Option<bool>) -> f32 {
 
         fn evaluate_rec<E, L>(base_evaluator: &mut E, list_moves_in: &mut L,
             state: &mut State, bufs: &mut [Vec<Move>], mut alpha: f32,
@@ -331,12 +351,13 @@ where
 
             let (moves, bufs_rest) = bufs.split_first_mut().unwrap();
             moves.clear();
-            list_moves_in.list_moves_in(&state.position(), moves);
+            let (check, move_count) = list_moves_in.list_moves_in(&state.position(), moves);
             moves.sort_by_cached_key(|m| estimate_move(m));
 
             // Actor can stop trading now, if they want.
 
-            let mut max = base_evaluator.evaluate_state(state, alpha, beta);
+            let mut max = base_evaluator.evaluate_state(
+                state, alpha, beta, Some(move_count), Some(check));
 
             for mov in moves {
                 let revert_info = state.make_move(&mov);
@@ -410,7 +431,7 @@ impl<E: BaseEvaluator> TreeSearchEvaluator<E> {
             bufs: &mut [Vec<Move>], mut alpha: f32, beta: f32)
             -> (f32, Option<Move>) {
         if bufs.len() == 1 {
-            (self.base_evaluator.evaluate_state(state, alpha, beta), None)
+            (self.base_evaluator.evaluate_state(state, alpha, beta, None, None), None)
         }
         else if state.is_stateful_draw() {
             // Checkmate is covered later

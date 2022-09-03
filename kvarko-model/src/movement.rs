@@ -43,8 +43,8 @@ fn get_pawn_push<D: StaticPlayer>(occupancy: Bitboard,
     progress | D::forward(progress) & free & D::FOURTH_RANK
 }
 
-fn get_pawn_attack<D: StaticPlayer>(square_singleton: Bitboard) -> Bitboard {
-    let straight = D::forward(square_singleton);
+fn get_pawn_attack<D: StaticPlayer>(pawns: Bitboard) -> Bitboard {
+    let straight = D::forward(pawns);
     let diagonal =
         ((straight << 1) & !LEFT_FILE) | ((straight >> 1) & !RIGHT_FILE);
     diagonal
@@ -515,15 +515,9 @@ impl CheckEvasionMasks {
     }
 }
 
-fn compute_pawn_attack_mask<D: StaticPlayer>(board: &Board, player: Player) -> Bitboard {
-    let mut attack = Bitboard::EMPTY;
-    let pawns = board.of_player_and_kind(player, Piece::Pawn).singletons();
-
-    for pawn in pawns {
-        attack |= get_pawn_attack::<D>(pawn);
-    }
-
-    attack
+fn compute_pawn_attack_mask<D: StaticPlayer>(board: &Board, player: Player)
+        -> Bitboard {
+    get_pawn_attack::<D>(board.of_player_and_kind(player, Piece::Pawn))
 }
 
 fn compute_opponent_attack_mask(position: &Position) -> Bitboard {
@@ -713,7 +707,7 @@ where
 /// excluded for future move generation.
 fn generate_pin_moves<P>(processor: &mut P, position: &Position,
     en_passant_target: Bitboard, player: Player, king_location: Location,
-    masks: &CheckEvasionMasks) -> Bitboard
+    masks: &CheckEvasionMasks, occupancy: Bitboard) -> Bitboard
 where
     P: MoveProcessor
 {
@@ -723,7 +717,7 @@ where
         processor, board, player, mask, king_location, get_rook_attack, Piece::Rook,
         |processor, pawn_singleton, mask|
             generate_pawn_push_moves(
-                processor, board, player, pawn_singleton, masks.push_mask & mask));
+                processor, board, player, pawn_singleton, masks.push_mask & mask, occupancy));
     let diagonal_pins = generate_directional_pin_moves(
         processor, board, player, mask, king_location, get_bishop_attack, Piece::Bishop,
             |processor, pawn_singleton, mask|
@@ -753,16 +747,13 @@ where
         board, player, king_singleton, targets, Piece::King);
 }
 
-fn generate_pawn_push_move_from_direction<Proc, Play>(processor: &mut Proc,
-    board: &Board, player: Player, source_singleton: Bitboard, mask: Bitboard)
+fn generate_pawn_push_moves_from_direction<Proc, Play>(processor: &mut Proc,
+    board: &Board, player: Player, source_singleton: Bitboard, mask: Bitboard,
+    occupancy: Bitboard)
 where
     Proc: MoveProcessor,
     Play: StaticPlayer
 {
-    // TODO avoid recomputation of occupancy
-
-    let occupancy =
-        board.of_player(Player::White) | board.of_player(Player::Black);
     let targets = get_pawn_push::<Play>(occupancy, source_singleton);
     let targets = targets & mask;
 
@@ -777,17 +768,18 @@ where
 }
 
 fn generate_pawn_push_moves<P>(processor: &mut P, board: &Board,
-    player: Player, source_singleton: Bitboard, mask: Bitboard)
+    player: Player, source_singleton: Bitboard, mask: Bitboard,
+    occupancy: Bitboard)
 where
     P: MoveProcessor
 {
     match player {
         Player::White =>
-            generate_pawn_push_move_from_direction::<_, White>(
-                processor, board, player, source_singleton, mask),
+            generate_pawn_push_moves_from_direction::<_, White>(
+                processor, board, player, source_singleton, mask, occupancy),
         Player::Black =>
-            generate_pawn_push_move_from_direction::<_, Black>(
-                processor, board, player, source_singleton, mask)
+            generate_pawn_push_moves_from_direction::<_, Black>(
+                processor, board, player, source_singleton, mask, occupancy)
     }
 }
 
@@ -1058,7 +1050,7 @@ where
 
     let pinned =
         generate_pin_moves(processor, position, en_passant_target, turn, 
-            king_location, &masks);
+            king_location, &masks, occupancy);
 
     let pawns = board.of_player_and_kind(turn, Piece::Pawn) - pinned;
     let knights = board.of_player_and_kind(turn, Piece::Knight) - pinned;
@@ -1068,7 +1060,7 @@ where
 
     for pawn_singleton in pawns.singletons() {
         generate_pawn_push_moves(
-            processor, board, turn, pawn_singleton, mask);
+            processor, board, turn, pawn_singleton, mask, occupancy);
         generate_pawn_capture_moves(processor, position, turn, pawn_singleton,
             en_passant_target, &masks);
     }
