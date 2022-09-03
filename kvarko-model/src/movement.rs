@@ -2,6 +2,8 @@
 //! can make in a given position. It also contains a move generation algorithm
 //! accessible through the function [list_moves].
 
+use serde::{Deserialize, Serialize};
+
 use std::iter::Peekable;
 use std::str::Chars;
 
@@ -115,12 +117,13 @@ fn parse_complete_or_not_final_position(chars: &mut Peekable<Chars>)
 
 impl AlgebraicMove {
     fn parse(algebraic: &str) -> AlgebraicResult<AlgebraicMove> {
-        if algebraic == "O-O" {
+        if algebraic == "O-O" || algebraic == "O-O+" || algebraic == "O-O#" {
             return Ok(AlgebraicMove::Castle {
                 long: false
             });
         }
-        else if algebraic == "O-O-O" {
+        else if algebraic == "O-O-O" || algebraic == "O-O-O+" ||
+                algebraic == "O-O-O#" {
             return Ok(AlgebraicMove::Castle {
                 long: true
             });
@@ -230,7 +233,7 @@ impl AlgebraicMove {
 ///
 /// Different kinds of moves are realized as different variants, although most
 /// moves - including captures - are covered by [Move::Ordinary].
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum Move {
 
     /// Any move made by one piece to one destination square which now holds
@@ -421,6 +424,86 @@ impl Move {
     }
 }
 
+/// Calls `process` for every singleton in `targets`, which is given as the
+/// second parameter. The first parameter is the piece which was captured, if
+/// any.
+fn process_targets<Proc>(board: &Board, player: Player, targets: Bitboard,
+    mut process: Proc)
+where
+    Proc: FnMut(Option<Piece>, Bitboard)
+{
+    let opponent_pieces = board.of_player(player.opponent());
+
+    for target_singleton in targets.singletons() {
+        let captured = if (opponent_pieces & target_singleton).is_empty() {
+            None
+        }
+        else {
+            Some(board.piece_at_singleton(target_singleton))
+        };
+
+        process(captured, target_singleton);
+    }
+}
+
+pub trait MoveProcessor {
+    fn process(&mut self, mov: Move);
+
+    fn process_moves_from_targets(&mut self, board: &Board, player: Player,
+            source_singleton: Bitboard, targets: Bitboard, moved: Piece) {
+        process_targets(board, player, targets, |captured, target_singleton| {
+            self.process(Move::Ordinary {
+                moved,
+                captured,
+                delta_mask: source_singleton | target_singleton
+            })
+        })
+    }
+
+    fn process_promotions_from_targets(&mut self, board: &Board,
+            player: Player, source_singleton: Bitboard, targets: Bitboard) {
+        process_targets(board, player, targets, |captured, target_singleton| {
+            for promotion in PROMOTABLE {
+                self.process(Move::Promotion {
+                    promotion,
+                    captured,
+                    delta_mask: source_singleton | target_singleton
+                })
+            }
+        })
+    }
+}
+
+struct MoveLister<'list> {
+    list: &'list mut Vec<Move>
+}
+
+impl<'list> MoveProcessor for MoveLister<'list> {
+    fn process(&mut self, mov: Move) {
+        self.list.push(mov)
+    }
+}
+
+struct MoveCounter {
+    number: usize
+}
+
+impl MoveProcessor for MoveCounter {
+    fn process(&mut self, _: Move) {
+        self.number += 1;
+    }
+
+    fn process_moves_from_targets(&mut self, _: &Board, _: Player, _: Bitboard,
+            targets: Bitboard, _: Piece) {
+        self.number += targets.len() as usize;
+    }
+
+    fn process_promotions_from_targets(&mut self, _: &Board, _: Player,
+            _: Bitboard, targets: Bitboard) {
+        self.number += targets.len() as usize * PROMOTABLE.len();
+    }
+}
+
 struct CheckEvasionMasks {
     capture_mask: Bitboard,
     push_mask: Bitboard
@@ -540,59 +623,6 @@ fn compute_king_attackers(board: &Board, player: Player) -> KingAttackers {
     }
 }
 
-/// Calls `process` for every singleton in `targets`, which is given as the
-/// second parameter. The first parameter is the piece which was captured, if
-/// any.
-fn process_targets<Proc>(board: &Board, player: Player, targets: Bitboard,
-    mut process: Proc)
-where
-    Proc: FnMut(Option<Piece>, Bitboard)
-{
-    let opponent_pieces = board.of_player(player.opponent());
-
-    for target_singleton in targets.singletons() {
-        let captured = if (opponent_pieces & target_singleton).is_empty() {
-            None
-        }
-        else {
-            Some(board.piece_at_singleton(target_singleton))
-        };
-
-        process(captured, target_singleton);
-    }
-}
-
-/// Generates moves from the given source to all fields in the given targets
-/// bitboard. Requires information which piece kind was `moved` and of which
-/// `player`.
-fn generate_moves_from_targets(moves: &mut Vec<Move>, board: &Board,
-        player: Player, source_singleton: Bitboard, targets: Bitboard,
-        moved: Piece) {
-    process_targets(board, player, targets, |captured, target_singleton| {
-        moves.push(Move::Ordinary {
-            moved,
-            captured,
-            delta_mask: source_singleton | target_singleton
-        })
-    })
-}
-
-/// Generates promotions to all promotable piece kinds rom the given source to
-/// all fields in the given targets bitboard. Requires information about which
-/// `player` moved the pawn.
-fn generate_promotions_from_targets(moves: &mut Vec<Move>, board: &Board,
-        player: Player, source_singleton: Bitboard, targets: Bitboard) {
-    process_targets(board, player, targets, |captured, target_singleton| {
-        for promotion in PROMOTABLE {
-            moves.push(Move::Promotion {
-                promotion,
-                captured,
-                delta_mask: source_singleton | target_singleton
-            })
-        }
-    })
-}
-
 /// Generates moves of pinned pieces in a specific direction.
 ///
 /// # Arguments
@@ -616,13 +646,14 @@ fn generate_promotions_from_targets(moves: &mut Vec<Move>, board: &Board,
 /// location, but only in the direction of pins. As an example, for diagonal
 /// pins, this does not need to consider push moves, only captures and en
 /// passant.
-fn generate_directional_pin_moves<GetAt, GenPawn>(moves: &mut Vec<Move>,
+fn generate_directional_pin_moves<P, GetAt, GenPawn>(processor: &mut P,
     board: &Board, player: Player, mask: Bitboard, king_location: Location,
     get_attack: GetAt, non_queen_slider: Piece, generate_pawn_moves: GenPawn)
     -> Bitboard
 where
+    P: MoveProcessor,
     GetAt: Fn(Bitboard, Location) -> Bitboard,
-    GenPawn: Fn(&mut Vec<Move>, Bitboard, Bitboard)
+    GenPawn: Fn(&mut P, Bitboard, Bitboard)
 {
     // General strategy: We cast rays from the given player's king by acting as
     // if it was a bishop/rook and find all own pieces hit by the rays. We then
@@ -662,14 +693,14 @@ where
         let pin_targets = pin_targets & mask;
 
         if board.is_of_kind_any(Piece::Pawn, pin_singleton) {
-            generate_pawn_moves(moves, pin_singleton, pin_targets);
+            generate_pawn_moves(processor, pin_singleton, pin_targets);
         }
         else if board.is_of_kind_any(non_queen_slider, pin_singleton) {
-            generate_moves_from_targets(moves, board, player, pin_singleton,
+            processor.process_moves_from_targets(board, player, pin_singleton,
                 pin_targets, non_queen_slider);
         }
         else if board.is_of_kind_any(Piece::Queen, pin_singleton) {
-            generate_moves_from_targets(moves, board, player, pin_singleton,
+            processor.process_moves_from_targets(board, player, pin_singleton,
                 pin_targets, Piece::Queen);
         }
     }
@@ -680,20 +711,23 @@ where
 /// Generates all moves of pinned pieces of the given player. Returns a
 /// bitboard of all fields on which a pinned piece stands. These can be
 /// excluded for future move generation.
-fn generate_pin_moves(moves: &mut Vec<Move>, position: &Position,
-        en_passant_target: Bitboard, player: Player, king_location: Location,
-        masks: &CheckEvasionMasks) -> Bitboard {
+fn generate_pin_moves<P>(processor: &mut P, position: &Position,
+    en_passant_target: Bitboard, player: Player, king_location: Location,
+    masks: &CheckEvasionMasks) -> Bitboard
+where
+    P: MoveProcessor
+{
     let board = position.board();
     let mask = masks.union();
     let orthogonal_pins = generate_directional_pin_moves(
-        moves, board, player, mask, king_location, get_rook_attack, Piece::Rook,
-        |moves, pawn_singleton, mask|
+        processor, board, player, mask, king_location, get_rook_attack, Piece::Rook,
+        |processor, pawn_singleton, mask|
             generate_pawn_push_moves(
-                moves, board, player, pawn_singleton, masks.push_mask & mask));
+                processor, board, player, pawn_singleton, masks.push_mask & mask));
     let diagonal_pins = generate_directional_pin_moves(
-        moves, board, player, mask, king_location, get_bishop_attack, Piece::Bishop,
-            |moves, pawn_singleton, mask|
-                generate_pawn_capture_moves(moves, position, player,
+        processor, board, player, mask, king_location, get_bishop_attack, Piece::Bishop,
+            |processor, pawn_singleton, mask|
+                generate_pawn_capture_moves(processor, position, player,
                     pawn_singleton, en_passant_target,
                     &CheckEvasionMasks {
                         capture_mask: masks.capture_mask & mask,
@@ -704,74 +738,87 @@ fn generate_pin_moves(moves: &mut Vec<Move>, position: &Position,
 }
 
 #[inline]
-fn generate_ordinary_king_moves(moves: &mut Vec<Move>, board: &Board,
-        player: Player, opponent_attack: Bitboard, king_singleton: Bitboard,
-        king_location: Location) {
+fn generate_ordinary_king_moves<P>(processor: &mut P, board: &Board,
+    player: Player, opponent_attack: Bitboard, king_singleton: Bitboard,
+    king_location: Location)
+where
+    P: MoveProcessor
+{
     // TODO avoid recomputation (was already done in compute_king_attackers)
 
     let targets = get_king_attack(king_location) & !board.of_player(player) &
         !opponent_attack;
 
-    generate_moves_from_targets(
-        moves, board, player, king_singleton, targets, Piece::King);
+    processor.process_moves_from_targets(
+        board, player, king_singleton, targets, Piece::King);
 }
 
-fn generate_pawn_push_move_from_direction<D: StaticPlayer>(moves: &mut Vec<Move>, board: &Board,
-    player: Player, source_singleton: Bitboard, mask: Bitboard)
+fn generate_pawn_push_move_from_direction<Proc, Play>(processor: &mut Proc,
+    board: &Board, player: Player, source_singleton: Bitboard, mask: Bitboard)
+where
+    Proc: MoveProcessor,
+    Play: StaticPlayer
 {
     // TODO avoid recomputation of occupancy
 
     let occupancy =
         board.of_player(Player::White) | board.of_player(Player::Black);
-    let targets = get_pawn_push::<D>(occupancy, source_singleton);
+    let targets = get_pawn_push::<Play>(occupancy, source_singleton);
     let targets = targets & mask;
 
-    if (targets & D::EIGHTH_RANK).is_empty() {
-        generate_moves_from_targets(
-            moves, board, player, source_singleton, targets, Piece::Pawn);
+    if (targets & Play::EIGHTH_RANK).is_empty() {
+        processor.process_moves_from_targets(
+            board, player, source_singleton, targets, Piece::Pawn);
     }
     else {
-        generate_promotions_from_targets(
-            moves, board, player, source_singleton, targets);
+        processor.process_promotions_from_targets(
+            board, player, source_singleton, targets);
     }
 }
 
-fn generate_pawn_push_moves(moves: &mut Vec<Move>, board: &Board,
-        player: Player, source_singleton: Bitboard, mask: Bitboard) {
+fn generate_pawn_push_moves<P>(processor: &mut P, board: &Board,
+    player: Player, source_singleton: Bitboard, mask: Bitboard)
+where
+    P: MoveProcessor
+{
     match player {
         Player::White =>
-            generate_pawn_push_move_from_direction::<White>(
-                moves, board, player, source_singleton, mask),
+            generate_pawn_push_move_from_direction::<_, White>(
+                processor, board, player, source_singleton, mask),
         Player::Black =>
-            generate_pawn_push_move_from_direction::<Black>(
-                moves, board, player, source_singleton, mask)
+            generate_pawn_push_move_from_direction::<_, Black>(
+                processor, board, player, source_singleton, mask)
     }
 }
 
-fn generate_pawn_capture_moves_from_direction<D: StaticPlayer>(
-        moves: &mut Vec<Move>, position: &Position, player: Player,
-        source_singleton: Bitboard, en_passant_target: Bitboard,
-        masks: &CheckEvasionMasks) {
+fn generate_pawn_capture_moves_from_direction<Proc, Play>(
+    processor: &mut Proc, position: &Position, player: Player,
+    source_singleton: Bitboard, en_passant_target: Bitboard,
+    masks: &CheckEvasionMasks)
+where
+    Proc: MoveProcessor,
+    Play: StaticPlayer
+{
     // TODO avoid recomputation of masks.union()
 
     let board = position.board();
     let opponent_pieces = board.of_player(player.opponent());
-    let attack = get_pawn_attack::<D>(source_singleton);
+    let attack = get_pawn_attack::<Play>(source_singleton);
     let capture_targets = attack & opponent_pieces & masks.capture_mask;
 
-    if (capture_targets & D::EIGHTH_RANK).is_empty() {
-        generate_moves_from_targets(moves, board, player, source_singleton,
-            capture_targets, Piece::Pawn);
+    if (capture_targets & Play::EIGHTH_RANK).is_empty() {
+        processor.process_moves_from_targets(
+            board, player, source_singleton, capture_targets, Piece::Pawn);
     }
     else {
-        generate_promotions_from_targets(
-            moves, board, player, source_singleton, capture_targets);
+        processor.process_promotions_from_targets(
+            board, player, source_singleton, capture_targets);
     }
 
     // en passant
 
     if !(attack & en_passant_target).is_empty() {
-        let en_passant_captured = D::back(en_passant_target);
+        let en_passant_captured = Play::back(en_passant_target);
 
         if !(en_passant_captured & masks.capture_mask).is_empty() ||
                 !(en_passant_target & masks.push_mask).is_empty() {
@@ -796,43 +843,50 @@ fn generate_pawn_capture_moves_from_direction<D: StaticPlayer>(
             });
 
             if !any_king_captures {
-                moves.push(mov);
+                processor.process(mov);
             }
         }
     }
 }
 
-fn generate_pawn_capture_moves(moves: &mut Vec<Move>, position: &Position,
-        player: Player, source_singleton: Bitboard,
-        en_passant_target: Bitboard, masks: &CheckEvasionMasks) {
+fn generate_pawn_capture_moves<P>(processor: &mut P, position: &Position,
+    player: Player, source_singleton: Bitboard, en_passant_target: Bitboard,
+    masks: &CheckEvasionMasks)
+where
+    P: MoveProcessor
+{
     match player {
         Player::White =>
-            generate_pawn_capture_moves_from_direction::<White>(
-                moves, position, player, source_singleton, en_passant_target,
+            generate_pawn_capture_moves_from_direction::<_, White>(
+                processor, position, player, source_singleton, en_passant_target,
                 masks),
         Player::Black =>
-            generate_pawn_capture_moves_from_direction::<Black>(
-                moves, position, player, source_singleton, en_passant_target,
+            generate_pawn_capture_moves_from_direction::<_, Black>(
+                processor, position, player, source_singleton, en_passant_target,
                 masks)
     }
 }
 
-fn generate_knight_moves(moves: &mut Vec<Move>, board: &Board, player: Player,
-        mask: Bitboard, source: Location) {
+fn generate_knight_moves<P>(processor: &mut P, board: &Board, player: Player,
+        mask: Bitboard, source: Location)
+where
+    P: MoveProcessor
+{
     // TODO avoid recomputation of valid
 
     let valid = !board.of_player(player);
     let targets = get_knight_attack(source) & mask & valid;
     let source_singleton = Bitboard::singleton(source);
 
-    generate_moves_from_targets(
-        moves, board, player, source_singleton, targets, Piece::Knight);
+    processor.process_moves_from_targets(
+        board, player, source_singleton, targets, Piece::Knight);
 }
 
-fn generate_slider_moves<GetAt>(moves: &mut Vec<Move>, board: &Board,
+fn generate_slider_moves<GetAt, P>(processor: &mut P, board: &Board,
     player: Player, mask: Bitboard, source: Location, get_attack: GetAt,
     piece: Piece)
 where
+    P: MoveProcessor,
     GetAt: Fn(Bitboard, Location) -> Bitboard
 {
     // TODO avoid recomputation of occupancy and valid
@@ -843,43 +897,56 @@ where
     let targets = get_attack(occupancy, source) & mask & valid;
     let source_singleton = Bitboard::singleton(source);
 
-    generate_moves_from_targets(
-        moves, board, player, source_singleton, targets, piece);
+    processor.process_moves_from_targets(
+        board, player, source_singleton, targets, piece);
 }
 
-fn generate_bishop_moves(moves: &mut Vec<Move>, board: &Board, player: Player,
-        mask: Bitboard, source: Location) {
+fn generate_bishop_moves<P>(processor: &mut P, board: &Board, player: Player,
+    mask: Bitboard, source: Location)
+where
+    P: MoveProcessor
+{
     generate_slider_moves(
-        moves, board, player, mask, source, get_bishop_attack, Piece::Bishop)
+        processor, board, player, mask, source, get_bishop_attack, Piece::Bishop)
 }
 
-fn generate_rook_moves(moves: &mut Vec<Move>, board: &Board, player: Player,
-        mask: Bitboard, source: Location) {
+fn generate_rook_moves<P>(processor: &mut P, board: &Board, player: Player,
+    mask: Bitboard, source: Location)
+where
+    P: MoveProcessor
+{
     generate_slider_moves(
-        moves, board, player, mask, source, get_rook_attack, Piece::Rook)
+        processor, board, player, mask, source, get_rook_attack, Piece::Rook)
 }
 
-fn generate_queen_moves(moves: &mut Vec<Move>, board: &Board, player: Player,
-        mask: Bitboard, source: Location) {
+fn generate_queen_moves<P>(processor: &mut P, board: &Board, player: Player,
+    mask: Bitboard, source: Location)
+where
+    P: MoveProcessor
+{
     generate_slider_moves(
-        moves, board, player, mask, source, get_queen_attack, Piece::Queen)
+        processor, board, player, mask, source, get_queen_attack, Piece::Queen)
 }
 
-fn generate_castle_move(moves: &mut Vec<Move>, opponent_attack: Bitboard,
-        occupancy: Bitboard, castle_info: &CastleInfo) {
+fn generate_castle_move<P>(processor: &mut P, opponent_attack: Bitboard,
+    occupancy: Bitboard, castle_info: &CastleInfo)
+where
+    P: MoveProcessor
+{
     if (opponent_attack & castle_info.passed).is_empty() &&
             (occupancy & castle_info.intermediate).is_empty() {
-        moves.push(Move::Castle {
+        processor.process(Move::Castle {
             king_delta_mask: castle_info.king_delta_mask,
             rook_delta_mask: castle_info.rook_delta_mask
         });
     }
 }
 
-fn generate_castle_moves_for<P>(moves: &mut Vec<Move>, position: &Position,
-    player: Player, opponent_attack: Bitboard)
+fn generate_castle_moves_for<Play, Proc>(processor: &mut Proc,
+    position: &Position, player: Player, opponent_attack: Bitboard)
 where
-    P: StaticPlayer
+    Play: StaticPlayer,
+    Proc: MoveProcessor
 {
     // TODO avoid recomputation of occupancy
 
@@ -889,28 +956,34 @@ where
 
     if position.may_short_castle(player) {
         generate_castle_move(
-            moves, opponent_attack, occupancy, &P::SHORT_CASTLE_INFO);
+            processor, opponent_attack, occupancy, &Play::SHORT_CASTLE_INFO);
     }
 
     if position.may_long_castle(player) {
         generate_castle_move(
-            moves, opponent_attack, occupancy, &P::LONG_CASTLE_INFO);
+            processor, opponent_attack, occupancy, &Play::LONG_CASTLE_INFO);
     }
 }
 
-fn generate_castle_moves(moves: &mut Vec<Move>, position: &Position,
-        player: Player, opponent_attack: Bitboard) {
+fn generate_castle_moves<P>(processor: &mut P, position: &Position,
+    player: Player, opponent_attack: Bitboard)
+where
+    P: MoveProcessor
+{
     match player {
         Player::White =>
-            generate_castle_moves_for::<White>(
-                moves, position, player, opponent_attack),
+            generate_castle_moves_for::<White, _>(
+                processor, position, player, opponent_attack),
         Player::Black =>
-            generate_castle_moves_for::<Black>(
-                moves, position, player, opponent_attack)
+            generate_castle_moves_for::<Black, _>(
+                processor, position, player, opponent_attack)
     }
 }
 
-pub fn list_moves_in(position: &Position, moves: &mut Vec<Move>) -> bool {
+pub fn process_moves<P>(position: &Position, processor: &mut P) -> bool
+where
+    P: MoveProcessor
+{
     let turn = position.turn();
     let board = position.board();
     let en_passant_target = if let Some(en_passant_file) =
@@ -936,7 +1009,7 @@ pub fn list_moves_in(position: &Position, moves: &mut Vec<Move>) -> bool {
     let opponent_attack = compute_opponent_attack_mask(position);
     let king_attackers = compute_king_attackers(board, turn);
 
-    generate_ordinary_king_moves(moves, board, turn, opponent_attack,
+    generate_ordinary_king_moves(processor, board, turn, opponent_attack,
         king_singleton, king_location);
 
     if king_attackers.all.len() > 1 {
@@ -974,7 +1047,7 @@ pub fn list_moves_in(position: &Position, moves: &mut Vec<Move>) -> bool {
         }
     }
     else {
-        generate_castle_moves(moves, position, turn, opponent_attack);
+        generate_castle_moves(processor, position, turn, opponent_attack);
     }
 
     let masks = CheckEvasionMasks {
@@ -984,7 +1057,7 @@ pub fn list_moves_in(position: &Position, moves: &mut Vec<Move>) -> bool {
     let mask = masks.union();
 
     let pinned =
-        generate_pin_moves(moves, position, en_passant_target, turn, 
+        generate_pin_moves(processor, position, en_passant_target, turn, 
             king_location, &masks);
 
     let pawns = board.of_player_and_kind(turn, Piece::Pawn) - pinned;
@@ -995,28 +1068,34 @@ pub fn list_moves_in(position: &Position, moves: &mut Vec<Move>) -> bool {
 
     for pawn_singleton in pawns.singletons() {
         generate_pawn_push_moves(
-            moves, board, turn, pawn_singleton, mask);
-        generate_pawn_capture_moves(moves, position, turn, pawn_singleton,
+            processor, board, turn, pawn_singleton, mask);
+        generate_pawn_capture_moves(processor, position, turn, pawn_singleton,
             en_passant_target, &masks);
     }
 
     for knight in knights.locations() {
-        generate_knight_moves(moves, board, turn, mask, knight);
+        generate_knight_moves(processor, board, turn, mask, knight);
     }
 
     for bishop in bishops.locations() {
-        generate_bishop_moves(moves, board, turn, mask, bishop);
+        generate_bishop_moves(processor, board, turn, mask, bishop);
     }
 
     for rook in rooks.locations() {
-        generate_rook_moves(moves, board, turn, mask, rook);
+        generate_rook_moves(processor, board, turn, mask, rook);
     }
 
     for queen in queens.locations() {
-        generate_queen_moves(moves, board, turn, mask, queen);
+        generate_queen_moves(processor, board, turn, mask, queen);
     }
 
     !king_attackers.all.is_empty()
+}
+
+pub fn list_moves_in(position: &Position, moves: &mut Vec<Move>) -> bool {
+    process_moves(position, &mut MoveLister {
+        list: moves
+    })
 }
 
 /// Returns a list of all legal moves that are available in a given position,
@@ -1037,6 +1116,15 @@ pub fn list_moves(position: &Position) -> (Vec<Move>, bool) {
     let check = list_moves_in(position, &mut moves);
 
     (moves, check)
+}
+
+pub fn count_moves(position: &Position) -> (usize, bool) {
+    let mut processor = MoveCounter {
+        number: 0
+    };
+    let check = process_moves(position, &mut processor);
+
+    (processor.number, check)
 }
 
 #[cfg(test)]

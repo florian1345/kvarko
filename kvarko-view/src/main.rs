@@ -1,4 +1,5 @@
 use std::env;
+use std::fs::File;
 use std::thread;
 
 use crate::view::{GameplayState, MuxState};
@@ -8,11 +9,36 @@ use ggez::{ContextBuilder, GameResult};
 use ggez::event;
 use ggez::graphics::{self, FilterMode, Rect};
 
+use kvarko_engine::book::OpeningBook;
+
 use kvarko_model::game::GameBuilder;
 use kvarko_model::state::State;
 
 mod sync;
 mod view;
+
+fn load_opening_book() -> Option<OpeningBook> {
+    const OPENING_BOOK_FILE: &str = "resources/opening-book.kob";
+
+    let mut file = match File::open(OPENING_BOOK_FILE) {
+        Ok(file) => file,
+        Err(_) => {
+            println!("No opening book found.");
+            return None;
+        }
+    };
+
+    match OpeningBook::load(&mut file) {
+        Ok(book) => {
+            println!("Loaded opening book with {} positions.", book.len());
+            Some(book)
+        },
+        Err(e) => {
+            eprintln!("Error loading opening book: {:?}", e);
+            None
+        }
+    }
+}
 
 fn main() -> GameResult {
     let mut args = env::args();
@@ -38,8 +64,8 @@ fn main() -> GameResult {
     thread::spawn(|| {
         let mut game = GameBuilder::new()
             .with_observer(view_observer)
-            .with_white(kvarko_engine::kvarko_engine(6))
-            .with_black(human_controller)
+            .with_white(human_controller)
+            .with_black(kvarko_engine::kvarko_engine(6, load_opening_book()))
             .build()
             .unwrap();
 

@@ -11,6 +11,7 @@ use kvarko_model::state::State;
 use std::time::Instant;
 
 mod args;
+mod book;
 
 fn perft(fen: &str, depth: usize) -> Result<usize, FenError> {
     fn perft_rec(state: &mut State, depth: usize, moves: &mut Vec<Move>)
@@ -51,8 +52,8 @@ fn eval(history: &str, depth: u32)
         state.make_move(&mov);
     }
 
-    let mut engine = kvarko_engine::kvarko_engine(depth);
-    Ok(engine.evaluate_state(&state, &mut Vec::new()))
+    let mut engine = kvarko_engine::kvarko_engine(depth, None);
+    Ok(engine.evaluate_state(&mut state))
 }
 
 fn main() {
@@ -90,6 +91,19 @@ fn main() {
                 },
                 Err(e) => {
                     eprintln!("Error with algebraic notation: {}", e);
+                }
+            }
+        },
+        Command::MakeBook { in_file, out_file, min_occurrences, max_depth } => {
+            match book::make_book(
+                    in_file, out_file, min_occurrences, max_depth) {
+                Ok(len) => {
+                    println!("Successfully created opening book with {} \
+                        positions.", len);
+                },
+                Err(e) => {
+                    // TODO proper display for error
+                    println!("Error during opening book creation: {:?}", e);
                 }
             }
         }

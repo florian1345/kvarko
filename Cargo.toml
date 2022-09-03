@@ -8,9 +8,6 @@ members = [
     "kvarko-view"
 ]
 
-[profile.test]
-opt-level = 1
-
 [profile.release]
 opt-level = 3
 lto = true

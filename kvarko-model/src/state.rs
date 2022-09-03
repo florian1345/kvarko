@@ -2,11 +2,13 @@
 //! information about the current game situation.
 
 use crate::board::{Board, Bitboard};
-use crate::error::{FenError, FenResult};
+use crate::error::{FenError, FenResult, AlgebraicResult};
 use crate::movement::{Move, list_moves};
 use crate::piece::Piece;
 use crate::player::{Black, Player, StaticPlayer, White, PLAYER_COUNT, PLAYERS};
 use crate::rules;
+
+use serde::{Deserialize, Serialize};
 
 /// Returned by [Position::make_move] to allow reverting the move with
 /// [Position::unmake_move].
@@ -17,7 +19,7 @@ pub struct PositionRevertInfo {
     en_passant_file: usize
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct PositionId {
     board_id: [Bitboard; 4],
     additional_data: u8 // TODO move this into the bitboards somehow
@@ -293,6 +295,24 @@ impl Position {
         }
     }
 
+    fn check_rook_capture<P>(&mut self, captured: Option<Piece>,
+        delta_mask: Bitboard)
+    where
+        P: StaticPlayer
+    {
+        if captured == Some(Piece::Rook) {
+            let opponent = self.turn.opponent();
+
+            if !(delta_mask & P::Opponent::CLOSE_ROOK_SINGLETON).is_empty() {
+                self.short_castles[opponent as usize] = false;
+            }
+
+            if !(delta_mask & P::Opponent::FAR_ROOK_SINGLETON).is_empty() {
+                self.long_castles[opponent as usize] = false;
+            }
+        }
+    }
+
     fn apply_ordinary_move<P>(&mut self, moved: Piece, captured: Option<Piece>,
         delta_mask: Bitboard)
     where
@@ -322,17 +342,7 @@ impl Position {
             }
         }
 
-        if captured == Some(Piece::Rook) {
-            let opponent = self.turn.opponent();
-
-            if !(delta_mask & P::Opponent::CLOSE_ROOK_SINGLETON).is_empty() {
-                self.short_castles[opponent as usize] = false;
-            }
-
-            if !(delta_mask & P::Opponent::FAR_ROOK_SINGLETON).is_empty() {
-                self.long_castles[opponent as usize] = false;
-            }
-        }
+        self.check_rook_capture::<P>(captured, delta_mask);
     }
 
     /// Applies the given move made by the given player to this position, that
@@ -368,6 +378,16 @@ impl Position {
             &Move::Castle { .. } => {
                 self.short_castles[self.turn as usize] = false;
                 self.long_castles[self.turn as usize] = false;
+                self.en_passant_file = usize::MAX;
+            },
+            &Move::Promotion { captured, delta_mask, .. } => {
+                match self.turn {
+                    Player::White =>
+                        self.check_rook_capture::<White>(captured, delta_mask),
+                    Player::Black =>
+                        self.check_rook_capture::<Black>(captured, delta_mask)
+                }
+
                 self.en_passant_file = usize::MAX;
             },
             _ => {
@@ -591,6 +611,22 @@ impl State {
             last_irreversible: 0,
             fifty_move_clock: half_move_clock
         })
+    }
+
+    pub fn from_algebraic_history<S, I>(history: I) -> AlgebraicResult<State>
+    where
+        S: AsRef<str>,
+        I: Iterator<Item = S>
+    {
+        let mut state = State::initial();
+
+        for algebraic in history {
+            let mov =
+                Move::parse_algebraic(state.position(), algebraic.as_ref())?;
+            state.make_move(&mov);
+        }
+
+        Ok(state)
     }
 
     /// Gets the current [Position].
@@ -1126,6 +1162,43 @@ mod tests {
         test_move(fen, mov, |state| {
             assert!(!state.position().may_long_castle(Player::Black));
             assert!(state.position().may_short_castle(Player::Black));
+        });
+    }
+
+    #[test]
+    fn promotion_capturing_rook_sets_castling_state() {
+        // Board (black to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ k │ b │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │ n │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │ Q │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │ p │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ R │   │   │   │ K │   │   │ R │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // Black captures the rook on h1 with the pawn, promoting to a knight.
+        // Capturing the rook prevents white from castling short in the future.
+
+        let fen = "8/8/3kb3/5n2/6Q1/8/1p6/R3K2R b KQ - 0 1";
+        let mov = Move::Promotion {
+            promotion: Piece::Knight,
+            captured: Some(Piece::Rook),
+            delta_mask: Bitboard(0x0000000000004080)
+        };
+
+        test_move(fen, mov, |state| {
+            assert!(state.position().may_long_castle(Player::White));
+            assert!(!state.position().may_short_castle(Player::White));
         });
     }
 

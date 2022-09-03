@@ -6,6 +6,8 @@ use crate::movement::Move;
 use crate::piece::{PIECE_COUNT, Piece, PIECES};
 use crate::player::{PLAYER_COUNT, Player, PLAYERS};
 
+use serde::{Deserialize, Serialize};
+
 use std::cmp::Ordering;
 use std::ops::{
     BitAnd,
@@ -142,7 +144,7 @@ impl Iterator for BitboardSingletonIter {
 /// implemented. [PartialOrd] is implemented in a manner consistent with the
 /// subset operation, i.e. `a <= b` if `a` is a subset of `b` or `a > b` if `a`
 /// is a proper superset of `b`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct Bitboard(pub u64);
 
 impl Bitboard {

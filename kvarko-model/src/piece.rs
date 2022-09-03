@@ -3,11 +3,13 @@
 
 use crate::error::{FenResult, FenError};
 
+use serde::{Deserialize, Serialize};
+
 /// An enumeration of the different kinds of pieces on the board. Does not
 /// encode the [Player] who owns the piece. This can be converted to a [usize]
 /// to obtain the piece index.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum Piece {
 
     /// A pawn. Can move forwards (towards the enemy's base) by one without

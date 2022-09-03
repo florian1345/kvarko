@@ -25,6 +25,20 @@ pub(crate) enum Command {
 
         #[clap(long)]
         depth: u32
+    },
+
+    MakeBook {
+        #[clap(short, long)]
+        in_file: String,
+
+        #[clap(short, long)]
+        out_file: String,
+
+        #[clap(long, default_value_t = 1)]
+        min_occurrences: u32,
+
+        #[clap(long, default_value_t = 32)]
+        max_depth: usize
     }
 }
 
