@@ -19,6 +19,8 @@ pub struct PositionRevertInfo {
     en_passant_file: usize
 }
 
+/// A unique ID for [Position]s that is smaller than positions in terms of
+/// memory. It can therefore be used as keys for hash maps or similar.
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct PositionId {
     board_id: [Bitboard; 4],
@@ -273,11 +275,23 @@ impl Position {
         self.turn
     }
 
+    /// Mutably sets whose player's turn it is. Note this may cause the
+    /// position to be invalid.
+    ///
+    /// # Arguments
+    ///
+    /// * `turn`: The [Player] whose turn it shall be.
     pub fn set_turn(&mut self, turn: Player) {
         self.turn = turn;
         self.en_passant_file = usize::MAX;
     }
 
+    /// Gets a unique ID for this position. This can be used as keys for hash
+    /// maps or similar.
+    ///
+    /// # Returns
+    ///
+    /// A unique [PositionId] for this position.
     pub fn unique_id(&self) -> PositionId {
         let mut board_id = self.board.unique_id();
 
@@ -613,6 +627,26 @@ impl State {
         })
     }
 
+    /// Generate a state by replaying a history of moves given in algebraic
+    /// notation, such as "Nxe7". For more information, see
+    /// [Move::parse_algebraic]. Before the first move, the state is put in the
+    /// initial position.
+    ///
+    /// # Arguments
+    ///
+    /// * `history`: An [Iterator] over [str] referencing instances that
+    /// contain algebraic notations for single moves. The moves are applied in
+    /// the order they are provided by this iterator.
+    ///
+    /// # Returns
+    ///
+    /// A new [State] that arises when the moves specified in `history` are
+    /// applied to the initial state.
+    ///
+    /// # Errors
+    ///
+    /// Any [AlgebraicError](crate::error::AlgebraicError) according to their
+    /// respective documentations.
     pub fn from_algebraic_history<S, I>(history: I) -> AlgebraicResult<State>
     where
         S: AsRef<str>,
@@ -744,6 +778,18 @@ impl State {
         self.position.unmake_move(mov, revert_info.position_revert_info);
     }
 
+    /// Indicates whether this state is a draw according to the stateful checks
+    /// that are part of he rules of chess. These are
+    ///
+    /// * Draw by repetition
+    /// * Draw by fifty-move rule
+    /// * Draw by insufficient material
+    ///
+    /// In particular, this does *not* check for draw by stalemate.
+    ///
+    /// # Returns
+    ///
+    /// True, if and only if this state is a draw by any stateful checks.
     pub fn is_stateful_draw(&self) -> bool {
         const MIN_LEN_FOR_REPETITION: usize =
             (rules::DRAW_REPETITION_COUNT - 1) * 4;

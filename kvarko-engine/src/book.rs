@@ -68,6 +68,11 @@ impl OpeningBook {
         bincode::serialize_into(writer, self)
     }
 
+    /// Creates a new, empty opening book.
+    ///
+    /// # Returns
+    ///
+    /// A new opening book without any entries.
     pub fn empty() -> OpeningBook {
         OpeningBook {
             map: HashMap::new()

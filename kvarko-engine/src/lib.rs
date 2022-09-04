@@ -53,8 +53,34 @@ pub trait StateEvaluator {
     fn evaluate_state(&mut self, state: &mut State) -> (f32, Option<Move>);
 }
 
+/// Similar to [StateEvaluator], however accepts additional parameters that are
+/// provided by the [TreeSearchEvaluator] or [QuiescenseTreeSearchEvaluator],
+/// which can be used to improve performance.
 pub trait BaseEvaluator {
-    fn evaluate_state(&mut self, state: &mut State, alpha: f32, beta: f32, moves: Option<usize>, check: Option<bool>) -> f32;
+
+    /// Provides an evaluation for the given state from the player's
+    /// perspective whose turn it currently is.
+    ///
+    /// # Arguments
+    ///
+    /// * `state`: A mutable reference to the current game [State]. This also
+    /// contains information about the player whose turn it is. Must be left in
+    /// the same state as before the method call.
+    /// * `alpha`: The current alpha parameter from alpha-beta-pruning.
+    /// * `beta`: The current beta parameter from alpha-beta-pruning.
+    /// * `moves`: If present, specifies the number of available moves for the
+    /// player whose turn it is.
+    /// * `check`: If available, specifies whether the player whose turn it is
+    /// is currently in check.
+    ///
+    /// # Returns
+    ///
+    /// As a first return parameter, this function returns an evaluation of the
+    /// current position, where negative numbers are more probably defeats than
+    /// victories and positive numbers are more probably victories than
+    /// defeats.
+    fn evaluate_state(&mut self, state: &mut State, alpha: f32, beta: f32,
+        moves: Option<usize>, check: Option<bool>) -> f32;
 }
 
 const CHECKMATE_DELTA: f32 = 1_000_000.0;
@@ -98,6 +124,8 @@ const RELEVANT_PIECES: [Piece; 5] = [
     Piece::Queen
 ];
 
+/// A [BaseEvaluator] that does no more tree search and gives a value estimate
+/// for a given position.
 pub struct KvarkoBaseEvaluator {
     values: [f32; 6],
     move_value: f32,
@@ -314,6 +342,9 @@ impl ListMovesIn for ListNonPawnCapturesIn {
 
 const QUIESCENSE_BUFFER_COUNT: usize = 15;
 
+/// A [BaseEvaluator] which does quiescense search on all moves provided by
+/// some [ListMovesIn] implementation. This searches the full tree, without any
+/// maximum depth. Alpha-beta-pruning is still applied.
 pub struct QuiescenseTreeSearchEvaluator<E, L> {
     base_evaluator: E,
     list_moves_in: L,
@@ -383,6 +414,8 @@ where
     }
 }
 
+/// A [StateEvaluator] that does a negimax tree search on the input state,
+/// using alpha-beta-pruning.
 pub struct TreeSearchEvaluator<E> {
     base_evaluator: E,
     search_depth: u32
@@ -497,6 +530,10 @@ impl<E: BaseEvaluator> StateEvaluator for TreeSearchEvaluator<E> {
     }
 }
 
+/// A wrapper around a [StateEvaluator] that implements [Controller] by playing
+/// the recommended move, if one is present, and otherwise checks which move
+/// would make the underlying state evaluator return the worst evaluation for
+/// the opponent.
 pub struct StateEvaluatingController<E>(E);
 
 impl<E: StateEvaluator> StateEvaluator for StateEvaluatingController<E> {
@@ -529,6 +566,13 @@ impl<E: StateEvaluator> Controller for StateEvaluatingController<E> {
 type KvarkoEvaluator = TreeSearchEvaluator<QuiescenseTreeSearchEvaluator<
     KvarkoBaseEvaluator, ListNonPawnCapturesIn>>;
 
+/// A [StateEvaluator] that represents the totality of functionality contained
+/// in the Kvarko engine. In particular, this uses a [TreeSearchEvaluator]
+/// followed by a [QuiescenseTreeSearchEvaluator] which uses the
+/// [KvarkoBaseEvaluator] for evaluation of base states. In addition, an
+/// [OpeningBook] may be provided.
+/// 
+/// Construct this engine using [kvarko_engine].
 pub struct KvarkoEngine {
     opening_book: Option<OpeningBook>,
     evaluator: KvarkoEvaluator
@@ -549,6 +593,20 @@ impl StateEvaluator for KvarkoEngine {
     }
 }
 
+/// Constructs a [KvarkoEngine].
+///
+/// # Arguments
+///
+/// * `depth`: The maximum search depth to which to search the game tree. Depth
+/// is counted in half-moves (ply), i.e. a depth of 2 would search all
+/// possibilities for 2 ply.
+/// * `opening_book`: Optionally, specifies an [OpeningBook] for the engine to
+/// use.
+///
+/// # Returns
+///
+/// A [StateEvaluatingController] wrapped around a [KvarkoEngine] with the
+/// given parameters.
 pub fn kvarko_engine(depth: u32, opening_book: Option<OpeningBook>)
         -> StateEvaluatingController<KvarkoEngine> {
     StateEvaluatingController(KvarkoEngine {

@@ -415,10 +415,43 @@ impl Move {
         }
     }
 
+    /// Gets the source square of the piece that is moved by this move.
+    ///
+    /// # Arguments
+    ///
+    /// * `position`: The current [Position]. As the `Move` type does not
+    /// distinguish between source and destination squares, for performance
+    /// reasons, it is necessary to check the current position to determine
+    /// which one is the source.
+    ///
+    /// # Returns
+    ///
+    /// The [Location] of the source square of the piece that is moved by this
+    /// move, or `None` if no possible source could be determined given the
+    /// current position (i.e. none of the squares are occupied by pieces which
+    /// belong to the active player). If both squares are occupied, an
+    /// unspecified one of them is returned.
     pub fn source(&self, position: &Position) -> Option<Location> {
         (self.delta_mask() & position.board().of_player(position.turn())).min()
     }
 
+    /// Gets the destination square to which the moved piece will be moved by
+    /// this move.
+    ///
+    /// # Arguments
+    ///
+    /// * `position`: The current [Position]. As the `Move` type does not
+    /// distinguish between source and destination squares, for performance
+    /// reasons, it is necessary to check the current position to determine
+    /// which one is the destination.
+    ///
+    /// # Returns
+    ///
+    /// The [Location] of the destination square to which the moved piece will
+    /// be moved by this move, or `None` if no possible destination could be
+    /// determined given the current position (i.e. both of the squares are
+    /// occupied by pieces which belong to the active player). If none of the
+    /// squares are occupied, an unspecified one of them is returned.
     pub fn destination(&self, position: &Position) -> Option<Location> {
         (self.delta_mask() - position.board().of_player(position.turn())).min()
     }
@@ -446,9 +479,33 @@ where
     }
 }
 
+/// A trait for types which can process moves found during [process_moves]. On
+/// every found, legal move, [MoveProcessor::process] is called. There are also
+/// some additional functions for batches of moves, which may help with
+/// performance.
 pub trait MoveProcessor {
+
+    /// Called whenever a new move was found.
+    ///
+    /// # Argument
+    ///
+    /// * `mov`: The [Move] that was found.
     fn process(&mut self, mov: Move);
 
+    /// Called whenever any number of moves were found for a singular piece.
+    /// This may also be called if no moves were actually found. By default,
+    /// this function generates actual, singular moves and calls
+    /// [MoveProcessor::process] with them.
+    ///
+    /// # Arguments
+    ///
+    /// * `board`: The current [Board] on which the moves are valid.
+    /// * `player`: The [Player] who can make the moves.
+    /// * `source_singleton`: A [Bitboard] containing only the location of the
+    /// piece that can be moved.
+    /// * `targets`: A [Bitboard] containing all locations to which the piece
+    /// can move. This may be empty.
+    /// * `moved`: The kind of [Piece] that is moved.
     fn process_moves_from_targets(&mut self, board: &Board, player: Player,
             source_singleton: Bitboard, targets: Bitboard, moved: Piece) {
         process_targets(board, player, targets, |captured, target_singleton| {
@@ -460,6 +517,20 @@ pub trait MoveProcessor {
         })
     }
 
+    /// Called whenever any number of promoting moves were found for a singular
+    /// pawn. This may also be called if no moves were actually found. Note the
+    /// different promotions (Knight, Bishop etc.) are not distinguished yet.
+    /// By default, this function generates actual, singular promotions (with
+    /// all options) and calls [MoveProcessor::process] with them.
+    ///
+    /// # Arguments
+    ///
+    /// * `board`: The current [Board] on which the promotions are valid.
+    /// * `player`: The [Player] who can make the promotions.
+    /// * `source_singleton`: A [Bitboard] containing only the location of the
+    /// pawn that can be promoted.
+    /// * `targets`: A [Bitboard] containing all locations to which the pawn
+    /// can move to promote. This may be empty.
     fn process_promotions_from_targets(&mut self, board: &Board,
             player: Player, source_singleton: Bitboard, targets: Bitboard) {
         process_targets(board, player, targets, |captured, target_singleton| {
@@ -1084,6 +1155,17 @@ where
     !king_attackers.all.is_empty()
 }
 
+/// Adds all legal moves to the given list, according to all the rules of
+/// chess. The active player is taken from the position.
+///
+/// # Arguments
+///
+/// * `position`: The [Position] from which to list all legal moves.
+/// * `moves`: A [Vec] to which to add all legal [Move]s.
+///
+/// # Returns
+///
+/// True, if and only if the player whose move it is is currently in check.
 pub fn list_moves_in(position: &Position, moves: &mut Vec<Move>) -> bool {
     process_moves(position, &mut MoveLister {
         list: moves
@@ -1110,6 +1192,18 @@ pub fn list_moves(position: &Position) -> (Vec<Move>, bool) {
     (moves, check)
 }
 
+/// Counts the number of legal moves, according to all the rules of chess. The
+/// active player is taken from the position.
+///
+/// # Arguments
+///
+/// * `position`: The [Position] from which to count all legal moves.
+///
+/// # Returns
+///
+/// As the first return value, returns the number of legal moves found for the
+/// current position. As a second value, returns a flag that is true if and
+/// only if the player whose move it is is currently in check.
 pub fn count_moves(position: &Position) -> (usize, bool) {
     let mut processor = MoveCounter {
         number: 0
