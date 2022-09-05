@@ -6,6 +6,7 @@ use serde::Deserialize;
 
 use std::fs::File;
 use std::io::BufReader;
+use std::path::Path as FsPath;
 
 use syn::{
     Expr,
@@ -262,7 +263,10 @@ fn verify_table(magics: &Magics, reqs: &[Requirement], table: &[u64]) -> bool {
 /// If anything goes wrong, an `Err(_)` variant with a message is returned.
 /// Otherwise, `Ok((magics, table))` is returned.
 fn load_magics_from(file: String) -> Result<(Magics, Vec<u64>), String> {
-    let file = File::open(file).map_err(|e| format!("{}", e))?;
+    let path = FsPath::new(env!("CARGO_MANIFEST_DIR"))
+        .parent().unwrap()
+        .join(file);
+    let file = File::open(path).map_err(|e| format!("{}", e))?;
     let reader = BufReader::new(file);
     let magics: Magics = serde_json::from_reader(reader)
         .map_err(|e| format!("{}", e))?;
