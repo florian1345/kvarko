@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct OpeningBookEntry {
     value: f32,
     best_move: Move,
@@ -18,7 +18,7 @@ struct OpeningBookEntry {
 /// values and moves with each [PositionId] in the book. It is further checked
 /// that the position is reached at the correct point in time to avoid causing
 /// draws by repetition.
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct OpeningBook {
     map: HashMap<PositionId, OpeningBookEntry>
 }

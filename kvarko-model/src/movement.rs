@@ -1204,6 +1204,19 @@ pub fn list_moves(position: &Position) -> (Vec<Move>, bool) {
 /// As the first return value, returns the number of legal moves found for the
 /// current position. As a second value, returns a flag that is true if and
 /// only if the player whose move it is is currently in check.
+///
+/// # Example
+///
+/// ```
+/// use kvarko_model::movement;
+/// use kvarko_model::state::Position;
+/// 
+/// let position = Position::initial();
+/// let (moves, check) = movement::count_moves(&position);
+///
+/// assert_eq!(20, moves);
+/// assert!(!check);
+/// ```
 pub fn count_moves(position: &Position) -> (usize, bool) {
     let mut processor = MoveCounter {
         number: 0

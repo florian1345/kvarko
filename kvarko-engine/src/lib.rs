@@ -126,6 +126,7 @@ const RELEVANT_PIECES: [Piece; 5] = [
 
 /// A [BaseEvaluator] that does no more tree search and gives a value estimate
 /// for a given position.
+#[derive(Clone)]
 pub struct KvarkoBaseEvaluator {
     values: [f32; 6],
     move_value: f32,
@@ -257,6 +258,7 @@ pub trait ListMovesIn {
         -> (bool, usize);
 }
 
+#[derive(Clone)]
 pub struct ListAllMovesIn;
 
 impl ListMovesIn for ListAllMovesIn {
@@ -267,6 +269,7 @@ impl ListMovesIn for ListAllMovesIn {
     }
 }
 
+#[derive(Clone)]
 pub struct ListCapturesIn;
 
 impl ListMovesIn for ListCapturesIn {
@@ -303,6 +306,7 @@ impl ListMovesIn for ListCapturesIn {
     }
 }
 
+#[derive(Clone)]
 pub struct ListNonPawnCapturesIn;
 
 impl ListMovesIn for ListNonPawnCapturesIn {
@@ -345,6 +349,7 @@ const QUIESCENSE_BUFFER_COUNT: usize = 15;
 /// A [BaseEvaluator] which does quiescense search on all moves provided by
 /// some [ListMovesIn] implementation. This searches the full tree, without any
 /// maximum depth. Alpha-beta-pruning is still applied.
+#[derive(Clone)]
 pub struct QuiescenseTreeSearchEvaluator<E, L> {
     base_evaluator: E,
     list_moves_in: L,
@@ -416,6 +421,7 @@ where
 
 /// A [StateEvaluator] that does a negimax tree search on the input state,
 /// using alpha-beta-pruning.
+#[derive(Clone)]
 pub struct TreeSearchEvaluator<E> {
     base_evaluator: E,
     search_depth: u32
@@ -534,6 +540,7 @@ impl<E: BaseEvaluator> StateEvaluator for TreeSearchEvaluator<E> {
 /// the recommended move, if one is present, and otherwise checks which move
 /// would make the underlying state evaluator return the worst evaluation for
 /// the opponent.
+#[derive(Clone)]
 pub struct StateEvaluatingController<E>(E);
 
 impl<E: StateEvaluator> StateEvaluator for StateEvaluatingController<E> {
@@ -573,6 +580,7 @@ type KvarkoEvaluator = TreeSearchEvaluator<QuiescenseTreeSearchEvaluator<
 /// [OpeningBook] may be provided.
 /// 
 /// Construct this engine using [kvarko_engine].
+#[derive(Clone)]
 pub struct KvarkoEngine {
     opening_book: Option<OpeningBook>,
     evaluator: KvarkoEvaluator
