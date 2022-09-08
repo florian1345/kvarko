@@ -9,8 +9,10 @@ use std::cmp::Ordering;
 use std::iter;
 
 use crate::book::OpeningBook;
+use crate::ttable::{ValueBound, TranspositionTable, PositionHasher, StatelessHasher};
 
 pub mod book;
+pub mod ttable;
 
 #[derive(PartialEq)]
 struct OrdF32(f32);
@@ -419,21 +421,25 @@ where
     }
 }
 
+const NO_TRANSPOSITION_SEARCH: u32 = 0;
+
 /// A [StateEvaluator] that does a negimax tree search on the input state,
 /// using alpha-beta-pruning.
 #[derive(Clone)]
 pub struct TreeSearchEvaluator<E> {
     base_evaluator: E,
-    search_depth: u32
+    search_depth: u32,
+    ttable_bits: u32
 }
 
 impl<E> TreeSearchEvaluator<E> {
 
-    pub fn new(base_evaluator: E, search_depth: u32)
+    pub fn new(base_evaluator: E, search_depth: u32, ttable_bits: u32)
             -> TreeSearchEvaluator<E> {
         TreeSearchEvaluator {
             base_evaluator,
-            search_depth
+            search_depth,
+            ttable_bits
         }
     }
 }
@@ -466,15 +472,54 @@ fn estimate_move(mov: &Move) -> OrdF32 {
 
 impl<E: BaseEvaluator> TreeSearchEvaluator<E> {
 
-    fn evaluate_rec(&mut self, state: &mut State,
-            bufs: &mut [Vec<Move>], mut alpha: f32, beta: f32)
-            -> (f32, Option<Move>) {
-        if bufs.len() == 1 {
-            (self.base_evaluator.evaluate_state(state, alpha, beta, None, None), None)
+    fn evaluate_rec<H: PositionHasher>(&mut self, state: &mut State,
+            bufs: &mut [Vec<Move>], mut alpha: f32, mut beta: f32, ttable: &mut TranspositionTable<H>)
+            -> (f32, Option<Move>, ValueBound) {
+        let depth = bufs.len() as u32;
+
+        if depth == 1 {
+            return (self.base_evaluator.evaluate_state(state, alpha, beta, None, None), None, ValueBound::Exact);
         }
-        else if state.is_stateful_draw() {
+
+        let id = state.position().unique_id();
+        let entry = ttable.get_entry(&id);
+
+        if let Some(entry) = entry {
+            if depth <= self.search_depth + 1 - NO_TRANSPOSITION_SEARCH &&
+                    entry.depth >= depth {
+                match entry.bound {
+                    ValueBound::Exact => {
+                        let mov = entry.recommended_move.clone();
+        
+                        return (entry.eval, Some(mov), entry.bound)
+                    },
+                    ValueBound::Lower => {
+                        if entry.eval >= beta {
+                            let mov = entry.recommended_move.clone();
+            
+                            return (entry.eval, Some(mov), entry.bound)
+                        }
+                        else {
+                            alpha = alpha.max(entry.eval);
+                        }
+                    },
+                    ValueBound::Upper => {
+                        if entry.eval <= alpha {
+                            let mov = entry.recommended_move.clone();
+            
+                            return (entry.eval, Some(mov), entry.bound)
+                        }
+                        else {
+                            beta = beta.min(entry.eval);
+                        }
+                    }
+                }
+            }
+        }
+
+        if state.is_stateful_draw() {
             // Checkmate is covered later
-            (0.0, None)
+            (0.0, None, ValueBound::Exact)
         }
         else {
             let (moves, bufs_rest) = bufs.split_first_mut().unwrap();
@@ -483,21 +528,34 @@ impl<E: BaseEvaluator> TreeSearchEvaluator<E> {
 
             if moves.is_empty() {
                 if check {
-                    return (-CHECKMATE_VALUE, None);
+                    return (-CHECKMATE_VALUE, None, ValueBound::Exact);
                 }
                 else {
-                    return (0.0, None);
+                    return (0.0, None, ValueBound::Exact);
                 }
             }
 
-            moves.sort_by_cached_key(|m| estimate_move(m));
+            if let Some(entry) = entry {
+                moves.sort_by_cached_key(|m| if m == &entry.recommended_move {
+                    OrdF32(f32::NEG_INFINITY)
+                }
+                else {
+                    estimate_move(m)
+                });
+            }
+            else {
+                moves.sort_by_cached_key(|m| estimate_move(m));
+            }
+
             let mut max = f32::NEG_INFINITY;
             let mut max_move = None;
+            let mut bound = ValueBound::Exact;
 
             for mov in moves {
                 let revert_info = state.make_move(&mov);
-                let mut value =
-                    -self.evaluate_rec(state, bufs_rest, -beta, -alpha).0;
+                let (rec_value, _, rec_bound) =
+                    self.evaluate_rec(state, bufs_rest, -beta, -alpha, ttable);
+                let mut value = -rec_value;
                 state.unmake_move(&mov, revert_info);
 
                 // Longer checkmate sequences have lower value.
@@ -512,16 +570,21 @@ impl<E: BaseEvaluator> TreeSearchEvaluator<E> {
                 if value > max {
                     max = value;
                     max_move = Some(mov);
+                    bound = rec_bound.invert();
                 }
 
                 alpha = alpha.max(max);
 
                 if alpha >= beta {
+                    bound = ValueBound::Lower;
                     break;
                 }
             }
 
-            (max, max_move.cloned())
+            let max_move = max_move.cloned().unwrap();
+            ttable.enter(id, depth, max, max_move.clone(), bound);
+
+            (max, Some(max_move), bound)
         }
     }
 }
@@ -532,7 +595,12 @@ impl<E: BaseEvaluator> StateEvaluator for TreeSearchEvaluator<E> {
         let mut bufs = iter::repeat_with(Vec::new)
             .take(self.search_depth as usize + 1)
             .collect::<Vec<_>>();
-        self.evaluate_rec(state, &mut bufs, f32::NEG_INFINITY, f32::INFINITY)
+        let mut ttable =
+            TranspositionTable::new(self.ttable_bits, StatelessHasher);
+        let (value, mov, _) = self.evaluate_rec(
+            state, &mut bufs, f32::NEG_INFINITY, f32::INFINITY, &mut ttable);
+
+        (value, mov)
     }
 }
 
@@ -624,7 +692,8 @@ pub fn kvarko_engine(depth: u32, opening_book: Option<OpeningBook>)
                 KvarkoBaseEvaluator::default(),
                 ListNonPawnCapturesIn
             ),
-            search_depth: depth
+            search_depth: depth,
+            ttable_bits: 20
         }
     })
 }

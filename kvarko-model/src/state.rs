@@ -23,8 +23,8 @@ pub struct PositionRevertInfo {
 /// memory. It can therefore be used as keys for hash maps or similar.
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct PositionId {
-    board_id: [Bitboard; 4],
-    additional_data: u8 // TODO move this into the bitboards somehow
+    pub board_id: [Bitboard; 4],
+    pub additional_data: u8 // TODO move this into the bitboards somehow
 }
 
 /// All information about the state of the game that does not relate to the
