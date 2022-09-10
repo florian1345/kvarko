@@ -1,8 +1,9 @@
 //! This module defines the [Position] and [State] structs, which manage
 //! information about the current game situation.
 
-use crate::board::{Board, Bitboard};
+use crate::board::{Board, Bitboard, Location};
 use crate::error::{FenError, FenResult, AlgebraicResult};
+use crate::hash::{PositionHasher, NopHasher};
 use crate::movement::{Move, list_moves};
 use crate::piece::Piece;
 use crate::player::{Black, Player, StaticPlayer, White, PLAYER_COUNT, PLAYERS};
@@ -309,32 +310,90 @@ impl Position {
         }
     }
 
-    fn check_rook_capture<P>(&mut self, captured: Option<Piece>,
-        delta_mask: Bitboard)
+    fn check_rook_capture<P, H>(&mut self, captured: Option<Piece>,
+        delta_mask: Bitboard, hasher: &mut H)
     where
-        P: StaticPlayer
+        P: StaticPlayer,
+        H: PositionHasher
     {
         if captured == Some(Piece::Rook) {
             let opponent = self.turn.opponent();
 
             if !(delta_mask & P::Opponent::CLOSE_ROOK_SINGLETON).is_empty() {
-                self.short_castles[opponent as usize] = false;
+                self.disable_short_castling(opponent, hasher);
             }
 
             if !(delta_mask & P::Opponent::FAR_ROOK_SINGLETON).is_empty() {
-                self.long_castles[opponent as usize] = false;
+                self.disable_long_castling(opponent, hasher);
             }
         }
     }
 
-    fn apply_ordinary_move<P>(&mut self, moved: Piece, captured: Option<Piece>,
-        delta_mask: Bitboard)
+    #[inline]
+    fn disable_short_castling<H>(&mut self, player: Player, hasher: &mut H)
     where
-        P: StaticPlayer
+        H: PositionHasher
     {
+        let index = player as usize;
+
+        if self.short_castles[index] {
+            hasher.on_castling_right_lost(player, false);
+        }
+
+        self.short_castles[index] = false;
+    }
+
+    #[inline]
+    fn disable_long_castling<H>(&mut self, player: Player, hasher: &mut H)
+    where
+        H: PositionHasher
+    {
+        let index = player as usize;
+
+        if self.long_castles[index] {
+            hasher.on_castling_right_lost(player, true);
+        }
+
+        self.long_castles[index] = false;
+    }
+
+    #[inline]
+    fn src_dest(&self, delta_mask: Bitboard) -> (Location, Location) {
+        let of_turn = self.board().of_player(self.turn);
+        let src = (delta_mask & of_turn).min_unchecked();
+        let dest = (delta_mask & !of_turn).min_unchecked();
+
+        (src, dest)
+    }
+
+    #[inline]
+    fn notify_movement<H>(&self, delta_mask: Bitboard, moved: Piece,
+        captured: Option<Piece>, hasher: &mut H)
+    where
+        H: PositionHasher
+    {
+        let (src, dest) = self.src_dest(delta_mask);
+
+        hasher.on_piece_left(moved, self.turn, src);
+        hasher.on_piece_entered(moved, self.turn, dest);
+
+        if let Some(captured) = captured {
+            hasher.on_piece_left(captured, self.turn.opponent(), dest);
+        }
+    }
+
+    fn apply_ordinary_move<P, H>(&mut self, moved: Piece, captured: Option<Piece>,
+        delta_mask: Bitboard, hasher: &mut H)
+    where
+        P: StaticPlayer,
+        H: PositionHasher
+    {
+        self.notify_movement(delta_mask, moved, captured, hasher);
+
         if moved == Piece::Pawn && !(delta_mask & P::SECOND_RANK).is_empty() &&
                 !(delta_mask & P::FOURTH_RANK).is_empty() {
             self.en_passant_file = delta_mask.min_unchecked().file();
+            hasher.on_en_passant_enabled(self.en_passant_file);
             return;
         }
         else {
@@ -342,21 +401,21 @@ impl Position {
         }
 
         if moved == Piece::King {
-            self.short_castles[self.turn as usize] = false;
-            self.long_castles[self.turn as usize] = false;
+            self.disable_short_castling(self.turn, hasher);
+            self.disable_long_castling(self.turn, hasher);
         }
 
         if moved == Piece::Rook {
             if !(delta_mask & P::CLOSE_ROOK_SINGLETON).is_empty() {
-                self.short_castles[self.turn as usize] = false;
+                self.disable_short_castling(self.turn, hasher);
             }
 
             if !(delta_mask & P::FAR_ROOK_SINGLETON).is_empty() {
-                self.long_castles[self.turn as usize] = false;
+                self.disable_long_castling(self.turn, hasher);
             }
         }
 
-        self.check_rook_capture::<P>(captured, delta_mask);
+        self.check_rook_capture::<P, _>(captured, delta_mask, hasher);
     }
 
     /// Applies the given move made by the given player to this position, that
@@ -372,45 +431,78 @@ impl Position {
     /// A [PositionRevertInfo] to be passed to [Position::unmake_move] in case
     /// the move should be reverted.
     pub fn make_move(&mut self, mov: &Move) -> PositionRevertInfo {
+        self.make_move_with_hasher(mov, &mut NopHasher)
+    }
+
+    pub fn make_move_with_hasher<H>(&mut self, mov: &Move, hasher: &mut H) -> PositionRevertInfo
+    where
+        H: PositionHasher
+    {
         let revert_info = PositionRevertInfo {
             short_castles: self.short_castles.clone(),
             long_castles: self.long_castles.clone(),
             en_passant_file: self.en_passant_file
         };
 
+        if let Some(en_passant_file) = self.en_passant_file() {
+            hasher.on_en_passant_disabled(en_passant_file);
+        }
+
         match mov {
             &Move::Ordinary { moved, captured, delta_mask } => {
                 match self.turn {
                     Player::White =>
-                        self.apply_ordinary_move::<White>(
-                            moved, captured, delta_mask),
+                        self.apply_ordinary_move::<White, _>(
+                            moved, captured, delta_mask, hasher),
                     Player::Black =>
-                        self.apply_ordinary_move::<Black>(
-                            moved, captured, delta_mask)
+                        self.apply_ordinary_move::<Black, _>(
+                            moved, captured, delta_mask, hasher)
                 }
             },
-            &Move::Castle { .. } => {
-                self.short_castles[self.turn as usize] = false;
-                self.long_castles[self.turn as usize] = false;
+            &Move::Castle { king_delta_mask, rook_delta_mask } => {
+                self.notify_movement(king_delta_mask, Piece::King, None, hasher);
+                self.notify_movement(rook_delta_mask, Piece::Rook, None, hasher);
+                self.disable_short_castling(self.turn, hasher);
+                self.disable_long_castling(self.turn, hasher);
                 self.en_passant_file = usize::MAX;
             },
-            &Move::Promotion { captured, delta_mask, .. } => {
+            &Move::Promotion { captured, delta_mask, promotion } => {
+                let (src, dest) = self.src_dest(delta_mask);
+
+                hasher.on_piece_left(Piece::Pawn, self.turn, src);
+                hasher.on_piece_entered(promotion, self.turn, dest);
+
+                if let Some(captured) = captured {
+                    hasher.on_piece_left(captured, self.turn.opponent(), dest);
+                }
+
                 match self.turn {
                     Player::White =>
-                        self.check_rook_capture::<White>(captured, delta_mask),
+                        self.check_rook_capture::<White, _>(
+                            captured, delta_mask, hasher),
                     Player::Black =>
-                        self.check_rook_capture::<Black>(captured, delta_mask)
+                        self.check_rook_capture::<Black, _>(
+                            captured, delta_mask, hasher)
                 }
 
                 self.en_passant_file = usize::MAX;
             },
-            _ => {
+            &Move::EnPassant { delta_mask, target } => {
+                let (src, dest) = self.src_dest(delta_mask);
+                let target = target.min_unchecked();
+
+                hasher.on_piece_left(Piece::Pawn, self.turn, src);
+                hasher.on_piece_entered(Piece::Pawn, self.turn, dest);
+                hasher.on_piece_left(
+                    Piece::Pawn, self.turn.opponent(), target);
+
                 self.en_passant_file = usize::MAX;
             }
         }
 
         self.board.make_move(self.turn, mov);
         self.turn = self.turn.opponent();
+        hasher.on_turn_changed(self.turn);
 
         revert_info
     }
@@ -433,6 +525,84 @@ impl Position {
         self.en_passant_file = revert_info.en_passant_file;
         self.turn = self.turn.opponent();
         self.board.unmake_move(self.turn, mov);
+    }
+
+    #[inline]
+    fn notify_inverse_movement<H>(&mut self, delta_mask: Bitboard,
+        moved: Piece, captured: Option<Piece>, hasher: &mut H)
+    where
+        H: PositionHasher
+    {
+        let turn = self.turn.opponent();
+        let (src, dest) = self.src_dest(delta_mask);
+
+        hasher.on_piece_left(moved, turn, src);
+        hasher.on_piece_entered(moved, turn, dest);
+
+        if let Some(captured) = captured {
+            hasher.on_piece_entered(captured, turn.opponent(), src);
+        }
+    }
+
+    pub fn unmake_move_with_hasher<H>(&mut self, mov: &Move, revert_info: PositionRevertInfo, hasher: &mut H)
+    where
+        H: PositionHasher
+    {
+        let turn = self.turn.opponent();
+        let turn_idx = turn as usize;
+
+        if !self.short_castles[turn_idx] &&
+                revert_info.short_castles[turn_idx] {
+            hasher.on_castling_right_gained(turn, false);
+        }
+
+        if !self.long_castles[turn_idx] && revert_info.long_castles[turn_idx] {
+            hasher.on_castling_right_gained(turn, true);
+        }
+
+        if let Some(en_passant_file) = self.en_passant_file() {
+            hasher.on_en_passant_disabled(en_passant_file);
+        }
+
+        if revert_info.en_passant_file != usize::MAX {
+            hasher.on_en_passant_enabled(revert_info.en_passant_file);
+        }
+
+        match mov {
+            &Move::Ordinary { moved, captured, delta_mask } => {
+                self.notify_inverse_movement(
+                    delta_mask, moved, captured, hasher);
+            },
+            &Move::Castle { king_delta_mask, rook_delta_mask } => {
+                self.notify_inverse_movement(
+                    king_delta_mask, Piece::King, None, hasher);
+                self.notify_inverse_movement(
+                    rook_delta_mask, Piece::Rook, None, hasher);
+            },
+            &Move::Promotion { captured, delta_mask, promotion } => {
+                let (src, dest) = self.src_dest(delta_mask);
+
+                hasher.on_piece_left(promotion, turn, src);
+                hasher.on_piece_entered(Piece::Pawn, turn, dest);
+
+                if let Some(captured) = captured {
+                    hasher.on_piece_entered(captured, turn.opponent(), src);
+                }
+            },
+            &Move::EnPassant { delta_mask, target } => {
+                let (src, dest) = self.src_dest(delta_mask);
+                let target = target.min_unchecked();
+
+                hasher.on_piece_left(Piece::Pawn, turn, src);
+                hasher.on_piece_entered(Piece::Pawn, turn, dest);
+                hasher.on_piece_entered(
+                    Piece::Pawn, turn.opponent(), target);
+            }
+        }
+
+        hasher.on_turn_changed(turn);
+
+        self.unmake_move(mov, revert_info);
     }
 
     /// Converts this position into FEN notation. To be precise, this only
@@ -711,25 +881,14 @@ impl State {
         self.fifty_move_clock
     }
 
-    /// Applies the given move made by the given player to this state, that is,
-    /// moves/removes/promotes all necessary pieces on the underlying board,
-    /// updates metadata, such as castling states and the turn, and tracks the
-    /// history of moves for the fifty-move rule and three-fold-repetition
-    /// rule.
-    ///
-    /// # Arguments
-    ///
-    /// * `mov`: The [Move] to apply.
-    ///
-    /// # Returns
-    ///
-    /// A [StateRevertInfo] to be passed to [State::unmake_move] in case the
-    /// move should be reverted.
-    pub fn make_move(&mut self, mov: &Move) -> StateRevertInfo {
+    fn make_move_do<F>(&mut self, mov: &Move, mut apply: F) -> StateRevertInfo
+    where
+        F: FnMut(&mut Position, &Move) -> PositionRevertInfo
+    {
         let index = self.history.len();
         self.history.push(self.position.unique_id());
 
-        let position_revert_info = self.position.make_move(mov);
+        let position_revert_info = apply(&mut self.position, mov);
         let revert_info = StateRevertInfo {
             position_revert_info,
             last_irreversible: self.last_irreversible,
@@ -759,6 +918,43 @@ impl State {
         revert_info
     }
 
+    /// Applies the given move made by the given player to this state, that is,
+    /// moves/removes/promotes all necessary pieces on the underlying board,
+    /// updates metadata, such as castling states and the turn, and tracks the
+    /// history of moves for the fifty-move rule and three-fold-repetition
+    /// rule.
+    ///
+    /// # Arguments
+    ///
+    /// * `mov`: The [Move] to apply.
+    ///
+    /// # Returns
+    ///
+    /// A [StateRevertInfo] to be passed to [State::unmake_move] in case the
+    /// move should be reverted.
+    pub fn make_move(&mut self, mov: &Move) -> StateRevertInfo {
+        self.make_move_do(mov, |p, m| p.make_move(m))
+    }
+
+    pub fn make_move_with_hasher<H>(&mut self, mov: &Move, hasher: &mut H)
+        -> StateRevertInfo
+    where
+        H: PositionHasher
+    {
+        self.make_move_do(mov, |p, m| p.make_move_with_hasher(m, hasher))
+    }
+
+    fn unmake_move_do<F>(&mut self, mov: &Move, revert_info: StateRevertInfo,
+        mut revert: F)
+    where
+        F: FnMut(&mut Position, &Move, PositionRevertInfo)
+    {
+        self.history.pop();
+        self.last_irreversible = revert_info.last_irreversible;
+        self.fifty_move_clock = revert_info.fifty_move_clock;
+        revert(&mut self.position, mov, revert_info.position_revert_info);
+    }
+
     /// Reverts the given move made by the given player to this state, that is,
     /// moves all pieces back, puts back captured pieces, and reverts
     /// promotions. In addition, all metadata such as castling rights and the
@@ -772,10 +968,16 @@ impl State {
     /// * `revert_info`: The [StateRevertInfo] returned by the call to
     /// [State::make_move] to revert.
     pub fn unmake_move(&mut self, mov: &Move, revert_info: StateRevertInfo) {
-        self.history.pop();
-        self.last_irreversible = revert_info.last_irreversible;
-        self.fifty_move_clock = revert_info.fifty_move_clock;
-        self.position.unmake_move(mov, revert_info.position_revert_info);
+        self.unmake_move_do(mov, revert_info, |p, m, r| p.unmake_move(m, r))
+    }
+
+    pub fn unmake_move_with_hasher<H>(&mut self, mov: &Move,
+        revert_info: StateRevertInfo, hasher: &mut H)
+    where
+        H: PositionHasher
+    {
+        self.unmake_move_do(mov, revert_info,
+            |p, m, r| p.unmake_move_with_hasher(m, r, hasher))
     }
 
     /// Indicates whether this state is a draw according to the stateful checks

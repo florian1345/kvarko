@@ -1,16 +1,23 @@
+use kvarko_model::hash::{PositionHasher, ZobristHasher};
 use kvarko_model::movement::Move;
-use kvarko_model::state::{Position, PositionId};
+use kvarko_model::state::Position;
+use rand::distributions::Standard;
+use rand::prelude::Distribution;
 
+use std::fmt::Debug;
 use std::iter;
+use std::ops::BitXorAssign;
 
 pub trait PositionHash : Copy + Clone + Eq {
     fn as_usize(self) -> usize;
 }
 
-pub trait PositionHasher {
+pub trait TTableHasher : PositionHasher {
     type Hash : PositionHash;
 
-    fn get(&self, position: &PositionId) -> Self::Hash;
+    fn init(position: &Position) -> Self;
+
+    fn hash(&self) -> Self::Hash;
 }
 
 impl PositionHash for u64 {
@@ -19,55 +26,26 @@ impl PositionHash for u64 {
     }
 }
 
-const PRIMES: [u64; 9] = [
-    1768914325752446339,
-    1770762389520301717,
-    7361957799628335583,
-    4677770329780902253,
-    7582026240224591227,
-    3614182435694795611,
-    9015491412946165507,
-    2508389373864496531,
-    7358950217208819701
+const SEED: [u8; 32] = [
+    0xe6, 0x38, 0x9d, 0xa7, 0x85, 0x26, 0xee, 0x45,
+    0x00, 0x69, 0x04, 0xfb, 0xf0, 0x81, 0x12, 0x90,
+    0xb4, 0x6c, 0x1a, 0x63, 0x08, 0x1d, 0xae, 0xe8,
+    0xec, 0x5f, 0xef, 0x75, 0x08, 0x4e, 0x1d, 0x6d
 ];
 
-pub struct StatelessHasher;
+impl<H> TTableHasher for ZobristHasher<H>
+where
+    H: PositionHash + BitXorAssign + Debug + Default,
+    Standard: Distribution<H>
+{
+    type Hash = H;
 
-impl PositionHasher for StatelessHasher {
-    type Hash = u64;
+    fn init(position: &Position) -> Self {
+        ZobristHasher::new(SEED.clone(), position)
+    }
 
-    fn get(&self, id: &PositionId) -> u64 {
-        /*let board = position.board();
-        let raw_inputs = [
-            board.of_player(Player::White).0,
-            board.of_player(Player::Black).0,
-            board.of_kind(Piece::Pawn).0,
-            board.of_kind(Piece::Knight).0,
-            board.of_kind(Piece::Bishop).0,
-            board.of_kind(Piece::Rook).0,
-            board.of_kind(Piece::Queen).0,
-            board.of_kind(Piece::King).0,
-            position.en_passant_file().unwrap_or(8) as u64 +
-                (position.may_short_castle(Player::White) as u64) << 5 +
-                (position.may_short_castle(Player::Black) as u64) << 6 +
-                (position.may_long_castle(Player::White) as u64) << 7 +
-                (position.may_long_castle(Player::Black) as u64) << 8 +
-                (position.turn() as u64) << 9
-        ];*/
-        let raw_inputs = [
-            id.board_id[0].0,
-            id.board_id[1].0,
-            id.board_id[2].0,
-            id.board_id[3].0,
-            id.additional_data as u64
-        ];
-        let mut sum = 0u64;
-
-        for i in 0..5 {
-            sum = sum.wrapping_add(raw_inputs[i].wrapping_mul(PRIMES[i]));
-        }
-
-        sum
+    fn hash(&self) -> H {
+        self.current_hash()
     }
 }
 
@@ -89,21 +67,21 @@ impl ValueBound {
 }
 
 #[derive(Clone)]
-pub struct TranspositionTableEntry {
-    id: PositionId,
+pub struct TranspositionTableEntry<H> {
+    hash: H,
     pub depth: u32,
     pub eval: f32,
     pub recommended_move: Move,
     pub bound: ValueBound
 }
 
-pub struct TranspositionTable<H: PositionHasher> {
+pub struct TranspositionTable<H: TTableHasher> {
     hasher: H,
-    entries: Box<[Option<TranspositionTableEntry>]>,
+    entries: Box<[Option<TranspositionTableEntry<H::Hash>>]>,
     mask: usize
 }
 
-impl<H: PositionHasher> TranspositionTable<H> {
+impl<H: TTableHasher> TranspositionTable<H> {
 
     pub fn new(bits: u32, hasher: H) -> TranspositionTable<H> {
         let len = 1usize << bits;
@@ -117,25 +95,35 @@ impl<H: PositionHasher> TranspositionTable<H> {
         }
     }
 
-    pub fn get_entry(&self, id: &PositionId)
-            -> Option<&TranspositionTableEntry> {
-        let hash = self.hasher.get(id);
+    pub fn get_entry(&self)
+            -> Option<&TranspositionTableEntry<H::Hash>> {
+        let hash = self.hasher.hash();
         let idx = hash.as_usize() & self.mask;
 
-        self.entries[idx].as_ref().filter(|e| &e.id == id)
+        self.entries[idx].as_ref().filter(|e| e.hash == hash)
     }
 
-    pub fn enter(&mut self, id: PositionId, depth: u32, evaluation: f32, recommended_move: Move, node_type: ValueBound) {
-        let hash = self.hasher.get(&id);
+    pub fn enter(&mut self, depth: u32, evaluation: f32, recommended_move: Move, node_type: ValueBound) {
+        let hash = self.hasher.hash();
         let idx = hash.as_usize() & self.mask;
-        let entry = TranspositionTableEntry {
-            id,
+        let entry = &mut self.entries[idx];
+
+        if let Some(entry) = entry {
+            if entry.depth > depth {
+                return;
+            }
+        }
+
+        *entry = Some(TranspositionTableEntry {
+            hash,
             depth,
             eval: evaluation,
             recommended_move,
             bound: node_type
-        };
+        });
+    }
 
-        self.entries[idx] = Some(entry);
+    pub fn hasher_mut(&mut self) -> &mut H {
+        &mut self.hasher
     }
 }

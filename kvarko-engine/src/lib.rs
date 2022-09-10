@@ -1,5 +1,6 @@
 use kvarko_model::board::Bitboard;
 use kvarko_model::game::Controller;
+use kvarko_model::hash::ZobristHasher;
 use kvarko_model::movement::{self, Move, MoveProcessor};
 use kvarko_model::state::{State, Position};
 use kvarko_model::piece::Piece;
@@ -9,7 +10,7 @@ use std::cmp::Ordering;
 use std::iter;
 
 use crate::book::OpeningBook;
-use crate::ttable::{ValueBound, TranspositionTable, PositionHasher, StatelessHasher};
+use crate::ttable::{ValueBound, TranspositionTable, TTableHasher};
 
 pub mod book;
 pub mod ttable;
@@ -472,7 +473,7 @@ fn estimate_move(mov: &Move) -> OrdF32 {
 
 impl<E: BaseEvaluator> TreeSearchEvaluator<E> {
 
-    fn evaluate_rec<H: PositionHasher>(&mut self, state: &mut State,
+    fn evaluate_rec<H: TTableHasher>(&mut self, state: &mut State,
             bufs: &mut [Vec<Move>], mut alpha: f32, mut beta: f32, ttable: &mut TranspositionTable<H>)
             -> (f32, Option<Move>, ValueBound) {
         let depth = bufs.len() as u32;
@@ -481,8 +482,7 @@ impl<E: BaseEvaluator> TreeSearchEvaluator<E> {
             return (self.base_evaluator.evaluate_state(state, alpha, beta, None, None), None, ValueBound::Exact);
         }
 
-        let id = state.position().unique_id();
-        let entry = ttable.get_entry(&id);
+        let entry = ttable.get_entry();
 
         if let Some(entry) = entry {
             if depth <= self.search_depth + 1 - NO_TRANSPOSITION_SEARCH &&
@@ -552,11 +552,13 @@ impl<E: BaseEvaluator> TreeSearchEvaluator<E> {
             let mut bound = ValueBound::Exact;
 
             for mov in moves {
-                let revert_info = state.make_move(&mov);
+                let revert_info =
+                    state.make_move_with_hasher(&mov, ttable.hasher_mut());
                 let (rec_value, _, rec_bound) =
                     self.evaluate_rec(state, bufs_rest, -beta, -alpha, ttable);
                 let mut value = -rec_value;
-                state.unmake_move(&mov, revert_info);
+                state.unmake_move_with_hasher(
+                    &mov, revert_info, ttable.hasher_mut());
 
                 // Longer checkmate sequences have lower value.
 
@@ -582,7 +584,7 @@ impl<E: BaseEvaluator> TreeSearchEvaluator<E> {
             }
 
             let max_move = max_move.cloned().unwrap();
-            ttable.enter(id, depth, max, max_move.clone(), bound);
+            ttable.enter(depth, max, max_move.clone(), bound);
 
             (max, Some(max_move), bound)
         }
@@ -595,8 +597,9 @@ impl<E: BaseEvaluator> StateEvaluator for TreeSearchEvaluator<E> {
         let mut bufs = iter::repeat_with(Vec::new)
             .take(self.search_depth as usize + 1)
             .collect::<Vec<_>>();
+        let hasher: ZobristHasher<u64> = ZobristHasher::init(state.position());
         let mut ttable =
-            TranspositionTable::new(self.ttable_bits, StatelessHasher);
+            TranspositionTable::new(self.ttable_bits, hasher);
         let (value, mov, _) = self.evaluate_rec(
             state, &mut bufs, f32::NEG_INFINITY, f32::INFINITY, &mut ttable);
 
