@@ -358,8 +358,9 @@ impl Position {
     }
 
     #[inline]
-    fn src_dest(&self, delta_mask: Bitboard) -> (Location, Location) {
-        let of_turn = self.board().of_player(self.turn);
+    fn src_dest(&self, delta_mask: Bitboard, player: Player)
+            -> (Location, Location) {
+        let of_turn = self.board().of_player(player);
         let src = (delta_mask & of_turn).min_unchecked();
         let dest = (delta_mask & !of_turn).min_unchecked();
 
@@ -372,7 +373,7 @@ impl Position {
     where
         H: PositionHasher
     {
-        let (src, dest) = self.src_dest(delta_mask);
+        let (src, dest) = self.src_dest(delta_mask, self.turn);
 
         hasher.on_piece_left(moved, self.turn, src);
         hasher.on_piece_entered(moved, self.turn, dest);
@@ -467,7 +468,7 @@ impl Position {
                 self.en_passant_file = usize::MAX;
             },
             &Move::Promotion { captured, delta_mask, promotion } => {
-                let (src, dest) = self.src_dest(delta_mask);
+                let (src, dest) = self.src_dest(delta_mask, self.turn);
 
                 hasher.on_piece_left(Piece::Pawn, self.turn, src);
                 hasher.on_piece_entered(promotion, self.turn, dest);
@@ -488,7 +489,7 @@ impl Position {
                 self.en_passant_file = usize::MAX;
             },
             &Move::EnPassant { delta_mask, target } => {
-                let (src, dest) = self.src_dest(delta_mask);
+                let (src, dest) = self.src_dest(delta_mask, self.turn);
                 let target = target.min_unchecked();
 
                 hasher.on_piece_left(Piece::Pawn, self.turn, src);
@@ -534,7 +535,7 @@ impl Position {
         H: PositionHasher
     {
         let turn = self.turn.opponent();
-        let (src, dest) = self.src_dest(delta_mask);
+        let (src, dest) = self.src_dest(delta_mask, turn);
 
         hasher.on_piece_left(moved, turn, src);
         hasher.on_piece_entered(moved, turn, dest);
@@ -580,7 +581,7 @@ impl Position {
                     rook_delta_mask, Piece::Rook, None, hasher);
             },
             &Move::Promotion { captured, delta_mask, promotion } => {
-                let (src, dest) = self.src_dest(delta_mask);
+                let (src, dest) = self.src_dest(delta_mask, turn);
 
                 hasher.on_piece_left(promotion, turn, src);
                 hasher.on_piece_entered(Piece::Pawn, turn, dest);
@@ -590,7 +591,7 @@ impl Position {
                 }
             },
             &Move::EnPassant { delta_mask, target } => {
-                let (src, dest) = self.src_dest(delta_mask);
+                let (src, dest) = self.src_dest(delta_mask, turn);
                 let target = target.min_unchecked();
 
                 hasher.on_piece_left(Piece::Pawn, turn, src);
