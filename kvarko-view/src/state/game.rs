@@ -18,13 +18,16 @@ use ggez::graphics::{
 
 use kvarko_model::board::{self, Location};
 use kvarko_model::game::{Observer, Controller};
+use kvarko_model::hash::ZobristHasher;
 use kvarko_model::movement::{self, Move};
 use kvarko_model::piece::Piece;
 use kvarko_model::player::Player;
-use kvarko_model::state::{State, Outcome};
+use kvarko_model::state::Outcome;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, Sender};
+
+type State = kvarko_model::state::State<ZobristHasher<u64>>;
 
 struct ImageManager {
     pieces: HashMap<(Player, Piece), Image>
@@ -72,7 +75,7 @@ pub struct ViewObserver {
     outcome_sender: Sender<Outcome>
 }
 
-impl Observer for ViewObserver {
+impl Observer<ZobristHasher<u64>> for ViewObserver {
 
     fn on_started(&mut self, initial_state: &State) {
         // Moves are rendered only as state updates, so we can "misuse" the
@@ -95,7 +98,7 @@ pub struct HumanController {
     requester: Requester<State, Move>
 }
 
-impl Controller for HumanController {
+impl Controller<ZobristHasher<u64>> for HumanController {
 
     fn make_move(&mut self, state: &State) -> Move {
         self.requester.query(state.clone()).unwrap()

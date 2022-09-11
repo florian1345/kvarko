@@ -1,3 +1,4 @@
+use kvarko_model::hash::PositionHasher;
 use kvarko_model::movement::Move;
 use kvarko_model::state::{PositionId, State};
 
@@ -79,7 +80,10 @@ impl OpeningBook {
         }
     }
 
-    fn get_entry(&self, state: &State) -> Option<&OpeningBookEntry> {
+    fn get_entry<H>(&self, state: &State<H>) -> Option<&OpeningBookEntry>
+    where
+        H: PositionHasher
+    {
         if let Some(entry) = self.map.get(&state.position().unique_id()) {
             if entry.at_ply == state.history().len() {
                 return Some(entry);
@@ -92,13 +96,19 @@ impl OpeningBook {
     /// Gets the value of a given `state` from the perspective of the player
     /// whose turn it is, or `None` if the state is not contained in this
     /// opening book.
-    pub fn get_value(&self, state: &State) -> Option<f32> {
+    pub fn get_value<H>(&self, state: &State<H>) -> Option<f32>
+    where
+        H: PositionHasher
+    {
         self.get_entry(state).map(|e| e.value)
     }
 
     /// Gets the recommended move in a given `state` for the player whose turn
     /// it is, or `None` if the state is not contained in this opening book.
-    pub fn get_best_move(&self, state: &State) -> Option<&Move> {
+    pub fn get_best_move<H>(&self, state: &State<H>) -> Option<&Move>
+    where
+        H: PositionHasher
+    {
         self.get_entry(state).map(|e| &e.best_move)
     }
 
@@ -111,7 +121,11 @@ impl OpeningBook {
     /// * `value`: The evaluation from the player's perspective whose turn it
     /// is.
     /// * `best_move`: The recommended [Move] for the player whose turn it is.
-    pub fn add_entry(&mut self, state: &State, value: f32, best_move: Move) {
+    pub fn add_entry<H>(&mut self, state: &State<H>, value: f32,
+        best_move: Move)
+    where
+        H: PositionHasher
+    {
         let id = state.position().unique_id();
         let at_ply = state.history().len();
 

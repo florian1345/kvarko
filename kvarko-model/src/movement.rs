@@ -1231,13 +1231,14 @@ mod tests {
 
     use std::fmt::Debug;
 
+    use crate::hash::IdHasher;
     use crate::state::State;
 
     use super::*;
 
     #[test]
     fn algebraic_history_results_in_correct_position() {
-        let mut state = State::initial();
+        let mut state: State<IdHasher> = State::initial();
         let history = "e4 d5 exd5 c5 dxc6 bxc6 Nf3 Nd7 Bc4 Bb7 O-O Qc7 Re1 \
             O-O-O d4 c5 dxc5 Ne5 c6 Ba6 Bxa6+ Kb8 Qxd8+ Qxd8 c7+ Ka8 cxd8=Q#"
             .split_whitespace();

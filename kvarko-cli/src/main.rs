@@ -5,6 +5,7 @@ use clap::Parser;
 use kvarko_engine::StateEvaluator;
 
 use kvarko_model::error::{FenError, AlgebraicError};
+use kvarko_model::hash::ZobristHasher;
 use kvarko_model::movement::{self, Move};
 use kvarko_model::state::State;
 
@@ -14,8 +15,8 @@ mod args;
 mod book;
 
 fn perft(fen: &str, depth: usize) -> Result<usize, FenError> {
-    fn perft_rec(state: &mut State, depth: usize, moves: &mut Vec<Move>)
-            -> usize {
+    fn perft_rec(state: &mut State<ZobristHasher<u64>>, depth: usize,
+            moves: &mut Vec<Move>) -> usize {
         if depth == 0 {
             return 1;
         }
@@ -45,7 +46,7 @@ fn perft(fen: &str, depth: usize) -> Result<usize, FenError> {
 
 fn eval(history: &str, depth: u32)
         -> Result<(f32, Option<Move>), AlgebraicError> {
-    let mut state = State::initial();
+    let mut state: State<ZobristHasher<u64>> = State::initial();
 
     for algebraic in history.split_whitespace() {
         let mov = Move::parse_algebraic(state.position(), algebraic)?;

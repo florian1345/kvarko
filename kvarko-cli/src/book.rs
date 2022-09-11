@@ -1,6 +1,7 @@
 use kvarko_engine::book::OpeningBook;
 
 use kvarko_model::error::{AlgebraicResult, AlgebraicError};
+use kvarko_model::hash::IdHasher;
 use kvarko_model::movement::Move;
 use kvarko_model::player::Player;
 use kvarko_model::state::State;
@@ -102,7 +103,7 @@ impl DatabaseTree {
         }
     }
 
-    fn enter_in_book(&self, min_occurrences: u32, state: &mut State,
+    fn enter_in_book(&self, min_occurrences: u32, state: &mut State<IdHasher>,
             book: &mut OpeningBook) -> AlgebraicResult<()> {
         if self.occurrences() < min_occurrences || self.children.is_empty() {
             return Ok(());

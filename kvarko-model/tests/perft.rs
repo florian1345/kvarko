@@ -1,7 +1,8 @@
+use kvarko_model::hash::IdHasher;
 use kvarko_model::movement::list_moves;
 use kvarko_model::state::State;
 
-fn perft_rec(state: &mut State, depth: usize) -> usize {
+fn perft_rec(state: &mut State<IdHasher>, depth: usize) -> usize {
     if depth == 0 {
         return 1;
     }

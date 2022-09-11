@@ -3,7 +3,7 @@
 
 use crate::board::{Board, Bitboard, Location};
 use crate::error::{FenError, FenResult, AlgebraicResult};
-use crate::hash::{PositionHasher, NopHasher};
+use crate::hash::{PositionHasher, IdHasher};
 use crate::movement::{Move, list_moves};
 use crate::piece::Piece;
 use crate::player::{Black, Player, StaticPlayer, White, PLAYER_COUNT, PLAYERS};
@@ -432,7 +432,7 @@ impl Position {
     /// A [PositionRevertInfo] to be passed to [Position::unmake_move] in case
     /// the move should be reverted.
     pub fn make_move(&mut self, mov: &Move) -> PositionRevertInfo {
-        self.make_move_with_hasher(mov, &mut NopHasher)
+        self.make_move_with_hasher(mov, &mut IdHasher)
     }
 
     pub fn make_move_with_hasher<H>(&mut self, mov: &Move, hasher: &mut H) -> PositionRevertInfo
@@ -692,14 +692,15 @@ pub struct StateRevertInfo {
 /// current [Position] as well as historical data to enforce the threefold
 /// repetition and fifty move rules.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct State {
+pub struct State<H: PositionHasher> {
     position: Position,
-    history: Vec<PositionId>,
+    history: Vec<H::Hash>,
     last_irreversible: usize,
-    fifty_move_clock: usize
+    fifty_move_clock: usize,
+    hasher: H
 }
 
-impl State {
+impl<H: PositionHasher> State<H> {
 
     /// Creates a new state in the initial configuration, i.e. in the
     /// [Position] described by [Position::initial] and empty move history.
@@ -707,12 +708,16 @@ impl State {
     /// # Returns
     ///
     /// A new state in the initial configuration.
-    pub fn initial() -> State {
+    pub fn initial() -> State<H> {
+        let position = Position::initial();
+        let hasher = H::init(&position);
+
         State {
             position: Position::initial(),
             history: Vec::new(),
             last_irreversible: 0,
-            fifty_move_clock: 0
+            fifty_move_clock: 0,
+            hasher
         }
     }
 
@@ -751,7 +756,7 @@ impl State {
     ///     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
     ///     .unwrap();
     /// ```
-    pub fn from_fen(fen: &str) -> FenResult<State> {
+    pub fn from_fen(fen: &str) -> FenResult<State<H>> {
         let mut parts = fen.split(' ');
         let pos_parts = (0..4)
             .map(|_| next_state_part(&mut parts, fen))
@@ -790,11 +795,14 @@ impl State {
             });
         }
 
+        let hasher = H::init(&position);
+
         Ok(State {
             position,
             history: Vec::new(),
             last_irreversible: 0,
-            fifty_move_clock: half_move_clock
+            fifty_move_clock: half_move_clock,
+            hasher
         })
     }
 
@@ -818,7 +826,8 @@ impl State {
     ///
     /// Any [AlgebraicError](crate::error::AlgebraicError) according to their
     /// respective documentations.
-    pub fn from_algebraic_history<S, I>(history: I) -> AlgebraicResult<State>
+    pub fn from_algebraic_history<S, I>(history: I)
+        -> AlgebraicResult<State<H>>
     where
         S: AsRef<str>,
         I: Iterator<Item = S>
@@ -843,29 +852,33 @@ impl State {
         &self.position
     }
 
-    /// Gets a slice containing all previous positions, excluding the current
-    /// one, in the order they happened. If this is empty, the current position
-    /// represents the initial state.
+    pub fn position_mut(&mut self) -> &mut Position {
+        &mut self.position
+    }
+
+    /// Gets a slice containing all previous position hashes, excluding the
+    /// current one, in the order they happened. If this is empty, the current
+    /// position represents the initial state.
     ///
     /// # Returns
     ///
-    /// A slice of all previous positions, where the first entry is the initial
-    /// position (unless the game is in its initial state), followed by the one
-    /// after the first half-move etc. The last position in the slice preceded
-    /// the current one. 
-    pub fn history(&self) -> &[PositionId] {
+    /// A slice of all previous position hashes, where the first entry is the
+    /// initial  position (unless the game is in its initial state), followed
+    /// by the one after the first half-move etc. The last position hash in the
+    /// slice preceded the current one. 
+    pub fn history(&self) -> &[H::Hash] {
         &self.history
     }
 
-    /// Gets a slice containing all previous positions since the last
+    /// Gets a slice containing all previous position hashes since the last
     /// irreversible move, that is, a pawn move, a capture, or castling. The
     /// position directly after the move is the first in the slice.
     ///
     /// # Returns
     ///
-    /// A slice containing all previous positions since the last irreversible
-    /// move.
-    pub fn reversible_history(&self) -> &[PositionId] {
+    /// A slice containing all previous position hashes since the last
+    /// irreversible move.
+    pub fn reversible_history(&self) -> &[H::Hash] {
         &self.history[self.last_irreversible..]
     }
 
@@ -882,14 +895,30 @@ impl State {
         self.fifty_move_clock
     }
 
-    fn make_move_do<F>(&mut self, mov: &Move, mut apply: F) -> StateRevertInfo
-    where
-        F: FnMut(&mut Position, &Move) -> PositionRevertInfo
-    {
-        let index = self.history.len();
-        self.history.push(self.position.unique_id());
+    pub fn position_hash(&self) -> H::Hash {
+        self.hasher.hash(&self.position)
+    }
 
-        let position_revert_info = apply(&mut self.position, mov);
+    /// Applies the given move made by the given player to this state, that is,
+    /// moves/removes/promotes all necessary pieces on the underlying board,
+    /// updates metadata, such as castling states and the turn, and tracks the
+    /// history of moves for the fifty-move rule and three-fold-repetition
+    /// rule.
+    ///
+    /// # Arguments
+    ///
+    /// * `mov`: The [Move] to apply.
+    ///
+    /// # Returns
+    ///
+    /// A [StateRevertInfo] to be passed to [State::unmake_move] in case the
+    /// move should be reverted.
+    pub fn make_move(&mut self, mov: &Move) -> StateRevertInfo {
+        let index = self.history.len();
+        self.history.push(self.position_hash());
+
+        let position_revert_info =
+            self.position.make_move_with_hasher(mov, &mut self.hasher);
         let revert_info = StateRevertInfo {
             position_revert_info,
             last_irreversible: self.last_irreversible,
@@ -919,43 +948,6 @@ impl State {
         revert_info
     }
 
-    /// Applies the given move made by the given player to this state, that is,
-    /// moves/removes/promotes all necessary pieces on the underlying board,
-    /// updates metadata, such as castling states and the turn, and tracks the
-    /// history of moves for the fifty-move rule and three-fold-repetition
-    /// rule.
-    ///
-    /// # Arguments
-    ///
-    /// * `mov`: The [Move] to apply.
-    ///
-    /// # Returns
-    ///
-    /// A [StateRevertInfo] to be passed to [State::unmake_move] in case the
-    /// move should be reverted.
-    pub fn make_move(&mut self, mov: &Move) -> StateRevertInfo {
-        self.make_move_do(mov, |p, m| p.make_move(m))
-    }
-
-    pub fn make_move_with_hasher<H>(&mut self, mov: &Move, hasher: &mut H)
-        -> StateRevertInfo
-    where
-        H: PositionHasher
-    {
-        self.make_move_do(mov, |p, m| p.make_move_with_hasher(m, hasher))
-    }
-
-    fn unmake_move_do<F>(&mut self, mov: &Move, revert_info: StateRevertInfo,
-        mut revert: F)
-    where
-        F: FnMut(&mut Position, &Move, PositionRevertInfo)
-    {
-        self.history.pop();
-        self.last_irreversible = revert_info.last_irreversible;
-        self.fifty_move_clock = revert_info.fifty_move_clock;
-        revert(&mut self.position, mov, revert_info.position_revert_info);
-    }
-
     /// Reverts the given move made by the given player to this state, that is,
     /// moves all pieces back, puts back captured pieces, and reverts
     /// promotions. In addition, all metadata such as castling rights and the
@@ -969,16 +961,11 @@ impl State {
     /// * `revert_info`: The [StateRevertInfo] returned by the call to
     /// [State::make_move] to revert.
     pub fn unmake_move(&mut self, mov: &Move, revert_info: StateRevertInfo) {
-        self.unmake_move_do(mov, revert_info, |p, m, r| p.unmake_move(m, r))
-    }
-
-    pub fn unmake_move_with_hasher<H>(&mut self, mov: &Move,
-        revert_info: StateRevertInfo, hasher: &mut H)
-    where
-        H: PositionHasher
-    {
-        self.unmake_move_do(mov, revert_info,
-            |p, m, r| p.unmake_move_with_hasher(m, r, hasher))
+        self.history.pop();
+        self.last_irreversible = revert_info.last_irreversible;
+        self.fifty_move_clock = revert_info.fifty_move_clock;
+        self.position.unmake_move_with_hasher(
+            mov, revert_info.position_revert_info, &mut self.hasher);
     }
 
     /// Indicates whether this state is a draw according to the stateful checks
@@ -1007,10 +994,10 @@ impl State {
 
         if reversible_history.len() >= MIN_LEN_FOR_REPETITION {
             let mut repetitions = 1;
-            let position_id = self.position.unique_id();
+            let position_hash = self.position_hash();
     
-            for old_position in reversible_history {
-                if old_position == &position_id {
+            for old_position_hash in reversible_history {
+                if old_position_hash == &position_hash {
                     repetitions += 1;
     
                     if repetitions == rules::DRAW_REPETITION_COUNT {
@@ -1100,7 +1087,7 @@ mod tests {
 
     const UNSET: usize = 1337;
 
-    fn test_move(fen: &str, mov: Move, assertions: impl Fn(&State)) {
+    fn test_move(fen: &str, mov: Move, assertions: impl Fn(&State<IdHasher>)) {
         let mut state = State::from_fen(fen).unwrap();
         // make last_irreversible testable
         state.last_irreversible = UNSET;

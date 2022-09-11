@@ -1,6 +1,6 @@
 use kvarko_model::board::Bitboard;
 use kvarko_model::game::Controller;
-use kvarko_model::hash::ZobristHasher;
+use kvarko_model::hash::PositionHasher;
 use kvarko_model::movement::{self, Move, MoveProcessor};
 use kvarko_model::state::{State, Position};
 use kvarko_model::piece::Piece;
@@ -10,7 +10,7 @@ use std::cmp::Ordering;
 use std::iter;
 
 use crate::book::OpeningBook;
-use crate::ttable::{ValueBound, TranspositionTable, TTableHasher};
+use crate::ttable::{ValueBound, TranspositionTable, TTableHash, TreeSearchTableEntry, DepthAndBound, ReplacementPolicy};
 
 pub mod book;
 pub mod ttable;
@@ -35,7 +35,7 @@ impl Ord for OrdF32 {
 /// A trait for types which can give an evaluation for a game [State], that is,
 /// a number representing how good the state is for the player whose turn it
 /// is.
-pub trait StateEvaluator {
+pub trait StateEvaluator<H: PositionHasher> {
 
     /// Provides an evaluation for the given state from the player's
     /// perspective whose turn it currently is.
@@ -53,13 +53,13 @@ pub trait StateEvaluator {
     /// victories and positive numbers are more probably victories than
     /// defeats. The optional second return parameter contains a recommended
     /// move.
-    fn evaluate_state(&mut self, state: &mut State) -> (f32, Option<Move>);
+    fn evaluate_state(&mut self, state: &mut State<H>) -> (f32, Option<Move>);
 }
 
 /// Similar to [StateEvaluator], however accepts additional parameters that are
 /// provided by the [TreeSearchEvaluator] or [QuiescenseTreeSearchEvaluator],
 /// which can be used to improve performance.
-pub trait BaseEvaluator {
+pub trait BaseEvaluator<H: PositionHasher> {
 
     /// Provides an evaluation for the given state from the player's
     /// perspective whose turn it currently is.
@@ -82,7 +82,7 @@ pub trait BaseEvaluator {
     /// current position, where negative numbers are more probably defeats than
     /// victories and positive numbers are more probably victories than
     /// defeats.
-    fn evaluate_state(&mut self, state: &mut State, alpha: f32, beta: f32,
+    fn evaluate_state(&mut self, state: &mut State<H>, alpha: f32, beta: f32,
         moves: Option<usize>, check: Option<bool>) -> f32;
 }
 
@@ -194,9 +194,10 @@ impl Default for KvarkoBaseEvaluator {
     }
 }
 
-impl BaseEvaluator for KvarkoBaseEvaluator {
+impl<H: PositionHasher> BaseEvaluator<H> for KvarkoBaseEvaluator {
 
-    fn evaluate_state(&mut self, state: &mut State, _: f32, _: f32, moves: Option<usize>, check: Option<bool>) -> f32 {
+    fn evaluate_state(&mut self, state: &mut State<H>, _: f32, _: f32,
+            moves: Option<usize>, check: Option<bool>) -> f32 {
         if state.is_stateful_draw() {
             return 0.0;
         }
@@ -371,19 +372,21 @@ impl<E, L> QuiescenseTreeSearchEvaluator<E, L> {
     }
 }
 
-impl<E, L> BaseEvaluator for QuiescenseTreeSearchEvaluator<E, L>
+impl<H, E, L> BaseEvaluator<H> for QuiescenseTreeSearchEvaluator<E, L>
 where
-    E: BaseEvaluator,
+    H: PositionHasher,
+    E: BaseEvaluator<H>,
     L: ListMovesIn
 {
-    fn evaluate_state(&mut self, state: &mut State, alpha: f32, beta: f32,
+    fn evaluate_state(&mut self, state: &mut State<H>, alpha: f32, beta: f32,
             _: Option<usize>, _: Option<bool>) -> f32 {
 
-        fn evaluate_rec<E, L>(base_evaluator: &mut E, list_moves_in: &mut L,
-            state: &mut State, bufs: &mut [Vec<Move>], mut alpha: f32,
+        fn evaluate_rec<H, E, L>(base_evaluator: &mut E, list_moves_in: &mut L,
+            state: &mut State<H>, bufs: &mut [Vec<Move>], mut alpha: f32,
             beta: f32) -> f32
         where
-            E: BaseEvaluator,
+            H: PositionHasher,
+            E: BaseEvaluator<H>,
             L: ListMovesIn
         {
             // TODO reduce code duplication
@@ -471,18 +474,24 @@ fn estimate_move(mov: &Move) -> OrdF32 {
     }
 }
 
-impl<E: BaseEvaluator> TreeSearchEvaluator<E> {
-
-    fn evaluate_rec<H: TTableHasher>(&mut self, state: &mut State,
-            bufs: &mut [Vec<Move>], mut alpha: f32, mut beta: f32, ttable: &mut TranspositionTable<H>)
-            -> (f32, Option<Move>, ValueBound) {
+impl<E> TreeSearchEvaluator<E> {
+    fn evaluate_rec<H, R>(&mut self, state: &mut State<H>, bufs: &mut [Vec<Move>],
+        mut alpha: f32, mut beta: f32,
+        ttable: &mut TranspositionTable<H, TreeSearchTableEntry, R>)
+        -> (f32, Option<Move>, ValueBound)
+    where
+        H: PositionHasher,
+        H::Hash: TTableHash,
+        E: BaseEvaluator<H>,
+        R: ReplacementPolicy<TreeSearchTableEntry>
+    {
         let depth = bufs.len() as u32;
 
         if depth == 1 {
             return (self.base_evaluator.evaluate_state(state, alpha, beta, None, None), None, ValueBound::Exact);
         }
 
-        let entry = ttable.get_entry();
+        let entry = ttable.get_entry(state.position_hash());
 
         if let Some(entry) = entry {
             if depth <= self.search_depth + 1 - NO_TRANSPOSITION_SEARCH &&
@@ -552,13 +561,11 @@ impl<E: BaseEvaluator> TreeSearchEvaluator<E> {
             let mut bound = ValueBound::Exact;
 
             for mov in moves {
-                let revert_info =
-                    state.make_move_with_hasher(&mov, ttable.hasher_mut());
+                let revert_info = state.make_move(&mov);
                 let (rec_value, _, rec_bound) =
                     self.evaluate_rec(state, bufs_rest, -beta, -alpha, ttable);
                 let mut value = -rec_value;
-                state.unmake_move_with_hasher(
-                    &mov, revert_info, ttable.hasher_mut());
+                state.unmake_move(&mov, revert_info);
 
                 // Longer checkmate sequences have lower value.
 
@@ -584,22 +591,31 @@ impl<E: BaseEvaluator> TreeSearchEvaluator<E> {
             }
 
             let max_move = max_move.cloned().unwrap();
-            ttable.enter(depth, max, max_move.clone(), bound);
+            ttable.enter(
+                state.position_hash(), TreeSearchTableEntry {
+                    depth,
+                    eval: max,
+                    recommended_move: max_move.clone(),
+                    bound
+                });
 
             (max, Some(max_move), bound)
         }
     }
 }
 
-impl<E: BaseEvaluator> StateEvaluator for TreeSearchEvaluator<E> {
-
-    fn evaluate_state(&mut self, state: &mut State) -> (f32, Option<Move>) {
+impl<H, E> StateEvaluator<H> for TreeSearchEvaluator<E>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash,
+    E: BaseEvaluator<H>
+{
+    fn evaluate_state(&mut self, state: &mut State<H>) -> (f32, Option<Move>) {
         let mut bufs = iter::repeat_with(Vec::new)
             .take(self.search_depth as usize + 1)
             .collect::<Vec<_>>();
-        let hasher: ZobristHasher<u64> = ZobristHasher::init(state.position());
         let mut ttable =
-            TranspositionTable::new(self.ttable_bits, hasher);
+            TranspositionTable::new(self.ttable_bits, DepthAndBound);
         let (value, mov, _) = self.evaluate_rec(
             state, &mut bufs, f32::NEG_INFINITY, f32::INFINITY, &mut ttable);
 
@@ -614,17 +630,24 @@ impl<E: BaseEvaluator> StateEvaluator for TreeSearchEvaluator<E> {
 #[derive(Clone)]
 pub struct StateEvaluatingController<E>(E);
 
-impl<E: StateEvaluator> StateEvaluator for StateEvaluatingController<E> {
+impl<H, E> StateEvaluator<H> for StateEvaluatingController<E>
+where
+    H: PositionHasher,
+    E: StateEvaluator<H>
+{
 
-    fn evaluate_state(&mut self, state: &mut State)
+    fn evaluate_state(&mut self, state: &mut State<H>)
             -> (f32, Option<Move>) {
         self.0.evaluate_state(state)
     }
 }
 
-impl<E: StateEvaluator> Controller for StateEvaluatingController<E> {
-
-    fn make_move(&mut self, state: &State) -> Move {
+impl<H, E> Controller<H> for StateEvaluatingController<E>
+where
+    H: PositionHasher + Clone,
+    E: StateEvaluator<H>
+{
+    fn make_move(&mut self, state: &State<H>) -> Move {
         let mut state = state.clone();
 
         if let Some(mov) = self.0.evaluate_state(&mut state).1 {
@@ -657,9 +680,12 @@ pub struct KvarkoEngine {
     evaluator: KvarkoEvaluator
 }
 
-impl StateEvaluator for KvarkoEngine {
-
-    fn evaluate_state(&mut self, state: &mut State) -> (f32, Option<Move>) {
+impl<H> StateEvaluator<H> for KvarkoEngine
+where
+    H: PositionHasher,
+    H::Hash: TTableHash
+{
+    fn evaluate_state(&mut self, state: &mut State<H>) -> (f32, Option<Move>) {
         if let Some(opening_book) = &self.opening_book {
             if let Some(value) = opening_book.get_value(state) {
                 let best_move = opening_book.get_best_move(state).unwrap();
