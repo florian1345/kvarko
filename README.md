@@ -1,7 +1,8 @@
 # kvarko
 
 The Kvarko Chess engine, written in Rust.
-At the moment it is in early development and not really usable.
+At the moment it is in early development and may behave strangely.
+To test it out, compile the project and execute the `kvarko-cli` or `kvarko-view` binary package.
 
 # Project structure
 
