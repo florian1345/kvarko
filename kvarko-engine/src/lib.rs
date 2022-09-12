@@ -1,5 +1,6 @@
 use kvarko_model::board::Bitboard;
 use kvarko_model::game::Controller;
+use kvarko_model::hash::PositionHasher;
 use kvarko_model::movement::{self, Move, MoveProcessor};
 use kvarko_model::state::{State, Position};
 use kvarko_model::piece::Piece;
@@ -9,8 +10,10 @@ use std::cmp::Ordering;
 use std::iter;
 
 use crate::book::OpeningBook;
+use crate::ttable::{ValueBound, TranspositionTable, TTableHash, TreeSearchTableEntry, DepthAndBound, ReplacementPolicy, TTableEntry, QuiescenceTableEntry, AlwaysReplace};
 
 pub mod book;
+pub mod ttable;
 
 #[derive(PartialEq)]
 struct OrdF32(f32);
@@ -32,7 +35,7 @@ impl Ord for OrdF32 {
 /// A trait for types which can give an evaluation for a game [State], that is,
 /// a number representing how good the state is for the player whose turn it
 /// is.
-pub trait StateEvaluator {
+pub trait StateEvaluator<H: PositionHasher> {
 
     /// Provides an evaluation for the given state from the player's
     /// perspective whose turn it currently is.
@@ -50,13 +53,13 @@ pub trait StateEvaluator {
     /// victories and positive numbers are more probably victories than
     /// defeats. The optional second return parameter contains a recommended
     /// move.
-    fn evaluate_state(&mut self, state: &mut State) -> (f32, Option<Move>);
+    fn evaluate_state(&mut self, state: &mut State<H>) -> (f32, Option<Move>);
 }
 
 /// Similar to [StateEvaluator], however accepts additional parameters that are
 /// provided by the [TreeSearchEvaluator] or [QuiescenseTreeSearchEvaluator],
 /// which can be used to improve performance.
-pub trait BaseEvaluator {
+pub trait BaseEvaluator<H: PositionHasher> {
 
     /// Provides an evaluation for the given state from the player's
     /// perspective whose turn it currently is.
@@ -79,7 +82,7 @@ pub trait BaseEvaluator {
     /// current position, where negative numbers are more probably defeats than
     /// victories and positive numbers are more probably victories than
     /// defeats.
-    fn evaluate_state(&mut self, state: &mut State, alpha: f32, beta: f32,
+    fn evaluate_state(&mut self, state: &mut State<H>, alpha: f32, beta: f32,
         moves: Option<usize>, check: Option<bool>) -> f32;
 }
 
@@ -191,9 +194,10 @@ impl Default for KvarkoBaseEvaluator {
     }
 }
 
-impl BaseEvaluator for KvarkoBaseEvaluator {
+impl<H: PositionHasher> BaseEvaluator<H> for KvarkoBaseEvaluator {
 
-    fn evaluate_state(&mut self, state: &mut State, _: f32, _: f32, moves: Option<usize>, check: Option<bool>) -> f32 {
+    fn evaluate_state(&mut self, state: &mut State<H>, _: f32, _: f32,
+            moves: Option<usize>, check: Option<bool>) -> f32 {
         if state.is_stateful_draw() {
             return 0.0;
         }
@@ -346,43 +350,104 @@ impl ListMovesIn for ListNonPawnCapturesIn {
 
 const QUIESCENSE_BUFFER_COUNT: usize = 15;
 
-/// A [BaseEvaluator] which does quiescense search on all moves provided by
-/// some [ListMovesIn] implementation. This searches the full tree, without any
-/// maximum depth. Alpha-beta-pruning is still applied.
-#[derive(Clone)]
-pub struct QuiescenseTreeSearchEvaluator<E, L> {
-    base_evaluator: E,
-    list_moves_in: L,
-    bufs: Vec<Vec<Move>>
-}
-
-impl<E, L> QuiescenseTreeSearchEvaluator<E, L> {
-
-    pub fn new(base_evaluator: E, list_moves_in: L)
-            -> QuiescenseTreeSearchEvaluator<E, L> {
-        QuiescenseTreeSearchEvaluator {
-            base_evaluator,
-            list_moves_in,
-            bufs: iter::repeat_with(Vec::new).take(QUIESCENSE_BUFFER_COUNT).collect()
+/// Applies the information stored in `entry` to the given alpha and beta
+/// bounds. If an early return is possible, `true` is returned.
+fn process_ttable_entry<E>(alpha: &mut f32, beta: &mut f32,
+    entry: &E) -> bool
+where
+    E: TTableEntry
+{
+    match entry.bound() {
+        ValueBound::Exact => {
+            true
+        },
+        ValueBound::Lower => {
+            if entry.eval() >= *beta {
+                true
+            }
+            else {
+                *alpha = alpha.max(entry.eval());
+                false
+            }
+        },
+        ValueBound::Upper => {
+            if entry.eval() <= *alpha {
+                true
+            }
+            else {
+                *beta = beta.min(entry.eval());
+                false
+            }
         }
     }
 }
 
-impl<E, L> BaseEvaluator for QuiescenseTreeSearchEvaluator<E, L>
+/// A [BaseEvaluator] which does quiescense search on all moves provided by
+/// some [ListMovesIn] implementation. This searches the full tree, without any
+/// maximum depth. Alpha-beta-pruning is still applied.
+#[derive(Clone)]
+pub struct QuiescenseTreeSearchEvaluator<H, E, L>
 where
-    E: BaseEvaluator,
+    H: PositionHasher,
+    H::Hash: TTableHash
+{
+    base_evaluator: E,
+    list_moves_in: L,
+    bufs: Vec<Vec<Move>>,
+    transposition_table:
+        TranspositionTable<H, QuiescenceTableEntry, AlwaysReplace>
+}
+
+impl<H, E, L> QuiescenseTreeSearchEvaluator<H, E, L>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash
+{
+
+    pub fn new(base_evaluator: E, list_moves_in: L, ttable_bits: u32)
+            -> QuiescenseTreeSearchEvaluator<H, E, L> {
+        QuiescenseTreeSearchEvaluator {
+            base_evaluator,
+            list_moves_in,
+            bufs: iter::repeat_with(Vec::new)
+                .take(QUIESCENSE_BUFFER_COUNT)
+                .collect(),
+            transposition_table:
+                TranspositionTable::new(ttable_bits, AlwaysReplace)
+        }
+    }
+}
+
+impl<H, E, L> BaseEvaluator<H> for QuiescenseTreeSearchEvaluator<H, E, L>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash,
+    E: BaseEvaluator<H>,
     L: ListMovesIn
 {
-    fn evaluate_state(&mut self, state: &mut State, alpha: f32, beta: f32,
+    fn evaluate_state(&mut self, state: &mut State<H>, alpha: f32, beta: f32,
             _: Option<usize>, _: Option<bool>) -> f32 {
 
-        fn evaluate_rec<E, L>(base_evaluator: &mut E, list_moves_in: &mut L,
-            state: &mut State, bufs: &mut [Vec<Move>], mut alpha: f32,
-            beta: f32) -> f32
+        fn evaluate_rec<H, E, L, R>(base_evaluator: &mut E,
+            list_moves_in: &mut L, state: &mut State<H>,
+            bufs: &mut [Vec<Move>], mut alpha: f32, mut beta: f32,
+            ttable: &mut TranspositionTable<H, QuiescenceTableEntry, R>)
+            -> (f32, ValueBound)
         where
-            E: BaseEvaluator,
-            L: ListMovesIn
+            H: PositionHasher,
+            H::Hash: TTableHash,
+            E: BaseEvaluator<H>,
+            L: ListMovesIn,
+            R: ReplacementPolicy<QuiescenceTableEntry>
         {
+            let entry = ttable.get_entry(state.position_hash());
+    
+            if let Some(entry) = entry {
+                if process_ttable_entry(&mut alpha, &mut beta, entry) {
+                    return (entry.eval, entry.bound);
+                }
+            }
+
             // TODO reduce code duplication
 
             let (moves, bufs_rest) = bufs.split_first_mut().unwrap();
@@ -394,46 +459,63 @@ where
 
             let mut max = base_evaluator.evaluate_state(
                 state, alpha, beta, Some(move_count), Some(check));
+            let mut bound = ValueBound::Exact;
 
             for mov in moves {
                 let revert_info = state.make_move(&mov);
-                let value = -evaluate_rec(
+                let (value, rec_bound) = evaluate_rec(
                     base_evaluator, list_moves_in, state, bufs_rest,
-                    -beta, -alpha);
+                    -beta, -alpha, ttable);
+                let value = -value;
                 state.unmake_move(&mov, revert_info);
 
-                max = max.max(value);
+                if value > max {
+                    max = value;
+                    bound = rec_bound.invert();
+                }
+
                 alpha = alpha.max(max);
 
                 if alpha >= beta {
+                    bound = ValueBound::Lower;
                     break;
                 }
             }
 
-            max
+            ttable.enter(
+                state.position_hash(), QuiescenceTableEntry {
+                    eval: max,
+                    bound
+                });
+
+            (max, bound)
         }
             
         evaluate_rec(
             &mut self.base_evaluator, &mut self.list_moves_in, state,
-            &mut self.bufs, alpha, beta)
+            &mut self.bufs, alpha, beta, &mut self.transposition_table).0
     }
 }
+
+const NO_TRANSPOSITION_SEARCH: u32 = 0;
 
 /// A [StateEvaluator] that does a negimax tree search on the input state,
 /// using alpha-beta-pruning.
 #[derive(Clone)]
 pub struct TreeSearchEvaluator<E> {
     base_evaluator: E,
-    search_depth: u32
+    search_depth: u32,
+    ttable_bits: u32
 }
 
 impl<E> TreeSearchEvaluator<E> {
 
-    pub fn new(base_evaluator: E, search_depth: u32)
+    pub fn new(base_evaluator: E, search_depth: u32, ttable_bits: u32)
             -> TreeSearchEvaluator<E> {
         TreeSearchEvaluator {
             base_evaluator,
-            search_depth
+            search_depth,
+            ttable_bits
         }
     }
 }
@@ -464,17 +546,37 @@ fn estimate_move(mov: &Move) -> OrdF32 {
     }
 }
 
-impl<E: BaseEvaluator> TreeSearchEvaluator<E> {
+impl<E> TreeSearchEvaluator<E> {
+    fn evaluate_rec<H, R>(&mut self, state: &mut State<H>, bufs: &mut [Vec<Move>],
+        mut alpha: f32, mut beta: f32,
+        ttable: &mut TranspositionTable<H, TreeSearchTableEntry, R>)
+        -> (f32, Option<Move>, ValueBound)
+    where
+        H: PositionHasher,
+        H::Hash: TTableHash,
+        E: BaseEvaluator<H>,
+        R: ReplacementPolicy<TreeSearchTableEntry>
+    {
+        let depth = bufs.len() as u32;
 
-    fn evaluate_rec(&mut self, state: &mut State,
-            bufs: &mut [Vec<Move>], mut alpha: f32, beta: f32)
-            -> (f32, Option<Move>) {
-        if bufs.len() == 1 {
-            (self.base_evaluator.evaluate_state(state, alpha, beta, None, None), None)
+        if depth == 1 {
+            return (self.base_evaluator.evaluate_state(state, alpha, beta, None, None), None, ValueBound::Exact);
         }
-        else if state.is_stateful_draw() {
+
+        let entry = ttable.get_entry(state.position_hash());
+
+        if let Some(entry) = entry {
+            if depth <= self.search_depth + 1 - NO_TRANSPOSITION_SEARCH &&
+                    entry.depth >= depth &&
+                    process_ttable_entry(&mut alpha, &mut beta, entry) {
+                let mov = entry.recommended_move.clone();
+                return (entry.eval, Some(mov), entry.bound)
+            }
+        }
+
+        if state.is_stateful_draw() {
             // Checkmate is covered later
-            (0.0, None)
+            (0.0, None, ValueBound::Exact)
         }
         else {
             let (moves, bufs_rest) = bufs.split_first_mut().unwrap();
@@ -483,21 +585,34 @@ impl<E: BaseEvaluator> TreeSearchEvaluator<E> {
 
             if moves.is_empty() {
                 if check {
-                    return (-CHECKMATE_VALUE, None);
+                    return (-CHECKMATE_VALUE, None, ValueBound::Exact);
                 }
                 else {
-                    return (0.0, None);
+                    return (0.0, None, ValueBound::Exact);
                 }
             }
 
-            moves.sort_by_cached_key(|m| estimate_move(m));
+            if let Some(entry) = entry {
+                moves.sort_by_cached_key(|m| if m == &entry.recommended_move {
+                    OrdF32(f32::NEG_INFINITY)
+                }
+                else {
+                    estimate_move(m)
+                });
+            }
+            else {
+                moves.sort_by_cached_key(|m| estimate_move(m));
+            }
+
             let mut max = f32::NEG_INFINITY;
             let mut max_move = None;
+            let mut bound = ValueBound::Exact;
 
             for mov in moves {
                 let revert_info = state.make_move(&mov);
-                let mut value =
-                    -self.evaluate_rec(state, bufs_rest, -beta, -alpha).0;
+                let (rec_value, _, rec_bound) =
+                    self.evaluate_rec(state, bufs_rest, -beta, -alpha, ttable);
+                let mut value = -rec_value;
                 state.unmake_move(&mov, revert_info);
 
                 // Longer checkmate sequences have lower value.
@@ -512,27 +627,47 @@ impl<E: BaseEvaluator> TreeSearchEvaluator<E> {
                 if value > max {
                     max = value;
                     max_move = Some(mov);
+                    bound = rec_bound.invert();
                 }
 
                 alpha = alpha.max(max);
 
                 if alpha >= beta {
+                    bound = ValueBound::Lower;
                     break;
                 }
             }
 
-            (max, max_move.cloned())
+            let max_move = max_move.cloned().unwrap();
+            ttable.enter(
+                state.position_hash(), TreeSearchTableEntry {
+                    depth,
+                    eval: max,
+                    recommended_move: max_move.clone(),
+                    bound
+                });
+
+            (max, Some(max_move), bound)
         }
     }
 }
 
-impl<E: BaseEvaluator> StateEvaluator for TreeSearchEvaluator<E> {
-
-    fn evaluate_state(&mut self, state: &mut State) -> (f32, Option<Move>) {
+impl<H, E> StateEvaluator<H> for TreeSearchEvaluator<E>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash,
+    E: BaseEvaluator<H>
+{
+    fn evaluate_state(&mut self, state: &mut State<H>) -> (f32, Option<Move>) {
         let mut bufs = iter::repeat_with(Vec::new)
             .take(self.search_depth as usize + 1)
             .collect::<Vec<_>>();
-        self.evaluate_rec(state, &mut bufs, f32::NEG_INFINITY, f32::INFINITY)
+        let mut ttable =
+            TranspositionTable::new(self.ttable_bits, DepthAndBound);
+        let (value, mov, _) = self.evaluate_rec(
+            state, &mut bufs, f32::NEG_INFINITY, f32::INFINITY, &mut ttable);
+
+        (value, mov)
     }
 }
 
@@ -543,17 +678,24 @@ impl<E: BaseEvaluator> StateEvaluator for TreeSearchEvaluator<E> {
 #[derive(Clone)]
 pub struct StateEvaluatingController<E>(E);
 
-impl<E: StateEvaluator> StateEvaluator for StateEvaluatingController<E> {
+impl<H, E> StateEvaluator<H> for StateEvaluatingController<E>
+where
+    H: PositionHasher,
+    E: StateEvaluator<H>
+{
 
-    fn evaluate_state(&mut self, state: &mut State)
+    fn evaluate_state(&mut self, state: &mut State<H>)
             -> (f32, Option<Move>) {
         self.0.evaluate_state(state)
     }
 }
 
-impl<E: StateEvaluator> Controller for StateEvaluatingController<E> {
-
-    fn make_move(&mut self, state: &State) -> Move {
+impl<H, E> Controller<H> for StateEvaluatingController<E>
+where
+    H: PositionHasher + Clone,
+    E: StateEvaluator<H>
+{
+    fn make_move(&mut self, state: &State<H>) -> Move {
         let mut state = state.clone();
 
         if let Some(mov) = self.0.evaluate_state(&mut state).1 {
@@ -570,8 +712,8 @@ impl<E: StateEvaluator> Controller for StateEvaluatingController<E> {
     }
 }
 
-type KvarkoEvaluator = TreeSearchEvaluator<QuiescenseTreeSearchEvaluator<
-    KvarkoBaseEvaluator, ListNonPawnCapturesIn>>;
+type KvarkoEvaluator<H> = TreeSearchEvaluator<QuiescenseTreeSearchEvaluator<
+    H, KvarkoBaseEvaluator, ListNonPawnCapturesIn>>;
 
 /// A [StateEvaluator] that represents the totality of functionality contained
 /// in the Kvarko engine. In particular, this uses a [TreeSearchEvaluator]
@@ -581,14 +723,21 @@ type KvarkoEvaluator = TreeSearchEvaluator<QuiescenseTreeSearchEvaluator<
 /// 
 /// Construct this engine using [kvarko_engine].
 #[derive(Clone)]
-pub struct KvarkoEngine {
+pub struct KvarkoEngine<H>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash
+{
     opening_book: Option<OpeningBook>,
-    evaluator: KvarkoEvaluator
+    evaluator: KvarkoEvaluator<H>
 }
 
-impl StateEvaluator for KvarkoEngine {
-
-    fn evaluate_state(&mut self, state: &mut State) -> (f32, Option<Move>) {
+impl<H> StateEvaluator<H> for KvarkoEngine<H>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash
+{
+    fn evaluate_state(&mut self, state: &mut State<H>) -> (f32, Option<Move>) {
         if let Some(opening_book) = &self.opening_book {
             if let Some(value) = opening_book.get_value(state) {
                 let best_move = opening_book.get_best_move(state).unwrap();
@@ -615,16 +764,22 @@ impl StateEvaluator for KvarkoEngine {
 ///
 /// A [StateEvaluatingController] wrapped around a [KvarkoEngine] with the
 /// given parameters.
-pub fn kvarko_engine(depth: u32, opening_book: Option<OpeningBook>)
-        -> StateEvaluatingController<KvarkoEngine> {
+pub fn kvarko_engine<H>(depth: u32, opening_book: Option<OpeningBook>)
+    -> StateEvaluatingController<KvarkoEngine<H>>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash
+{
     StateEvaluatingController(KvarkoEngine {
         opening_book,
         evaluator: TreeSearchEvaluator {
             base_evaluator: QuiescenseTreeSearchEvaluator::new(
                 KvarkoBaseEvaluator::default(),
-                ListNonPawnCapturesIn
+                ListNonPawnCapturesIn,
+                18
             ),
-            search_depth: depth
+            search_depth: depth,
+            ttable_bits: 20
         }
     })
 }

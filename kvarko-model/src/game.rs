@@ -1,10 +1,11 @@
 use crate::error::{BuildGameResult, BuildGameError};
+use crate::hash::PositionHasher;
 use crate::movement::Move;
 use crate::player::Player;
 use crate::state::{Outcome, State};
 
 /// A trait for types that consume events raised in a game of chess.
-pub trait Observer {
+pub trait Observer<H: PositionHasher> {
 
     /// Notification that all initial variables have been specified and the
     /// game is now in the initial state. No moves have been made yet.
@@ -12,7 +13,7 @@ pub trait Observer {
     /// # Arguments
     ///
     /// * `_initial_state`: The initial [State].
-    fn on_started(&mut self, _initial_state: &State) { }
+    fn on_started(&mut self, _initial_state: &State<H>) { }
 
     /// Notification that a move has been made and the game state has changed.
     ///
@@ -23,7 +24,7 @@ pub trait Observer {
     /// offered by [Position::turn](crate::state::Position::turn) on
     /// [State::position] is now the player whose turn it is after the move,
     /// i.e. the opponent of the player who made the given move.
-    fn on_move_made(&mut self, _mov: &Move, _new_state: &State) { }
+    fn on_move_made(&mut self, _mov: &Move, _new_state: &State<H>) { }
 
     /// Notification that an outcome of the game could be determined, that is,
     /// one player checkmated the other or it is a draw.
@@ -36,12 +37,12 @@ pub trait Observer {
     /// * `_outcome`: The [Outcome] of the game (victory of one player or
     /// draw).
     /// * `_final_state`: The final [State] of the game.
-    fn on_outcome(&mut self, _outcome: Outcome, _final_state: &State) { }
+    fn on_outcome(&mut self, _outcome: Outcome, _final_state: &State<H>) { }
 }
 
 /// A controller makes moves for a player in a game of Chess. This trait is to
 /// be implemented by all AIs.
-pub trait Controller {
+pub trait Controller<H: PositionHasher> {
 
     /// This method is called before the first move is queried and allows any
     /// initialization that needs to be done by this controller. By default, it
@@ -65,20 +66,20 @@ pub trait Controller {
     /// # Returns
     ///
     /// A valid [Move] to be made in the current state.
-    fn make_move(&mut self, state: &State) -> Move;
+    fn make_move(&mut self, state: &State<H>) -> Move;
 }
 
 /// Manages gameplay of a single game of Chess. Individual players' decisions
 /// are made by [Controller]s. Construct this struct using the [GameBuilder].
-pub struct Game {
-    state: State,
-    white: Box<dyn Controller>,
-    black: Box<dyn Controller>,
-    observers: Vec<Box<dyn Observer>>,
+pub struct Game<H: PositionHasher> {
+    state: State<H>,
+    white: Box<dyn Controller<H>>,
+    black: Box<dyn Controller<H>>,
+    observers: Vec<Box<dyn Observer<H>>>,
     outcome: Option<Outcome>
 }
 
-impl Game {
+impl<H: PositionHasher> Game<H> {
 
     fn update_outcome(&mut self) {
         self.outcome = self.state.compute_outcome();
@@ -147,17 +148,17 @@ impl Game {
 }
 
 /// A builder struct for [Game]s.
-pub struct GameBuilder {
-    state: State,
-    white: Option<Box<dyn Controller>>,
-    black: Option<Box<dyn Controller>>,
-    observers: Vec<Box<dyn Observer>>
+pub struct GameBuilder<H: PositionHasher> {
+    state: State<H>,
+    white: Option<Box<dyn Controller<H>>>,
+    black: Option<Box<dyn Controller<H>>>,
+    observers: Vec<Box<dyn Observer<H>>>
 }
 
-impl GameBuilder {
+impl<H: PositionHasher> GameBuilder<H> {
 
     /// Creates a new game builder with the default initial position.
-    pub fn new() -> GameBuilder {
+    pub fn new() -> GameBuilder<H> {
         GameBuilder {
             state: State::initial(),
             white: None,
@@ -175,7 +176,7 @@ impl GameBuilder {
     /// # Returns
     ///
     /// This builder for chaining.
-    pub fn with_initial_state(mut self, state: State) -> GameBuilder {
+    pub fn with_initial_state(mut self, state: State<H>) -> GameBuilder<H> {
         self.state = state;
         self
     }
@@ -192,8 +193,8 @@ impl GameBuilder {
     /// # Returns
     ///
     /// This builder for chaining.
-    pub fn with_white_box(mut self, controller: Box<dyn Controller>)
-            -> GameBuilder {
+    pub fn with_white_box(mut self, controller: Box<dyn Controller<H>>)
+            -> GameBuilder<H> {
         self.white = Some(controller);
         self
     }
@@ -211,9 +212,9 @@ impl GameBuilder {
     /// # Returns
     ///
     /// This builder for chaining.
-    pub fn with_white<C>(self, controller: C) -> GameBuilder
+    pub fn with_white<C>(self, controller: C) -> GameBuilder<H>
     where
-        C: Controller + 'static
+        C: Controller<H> + 'static
     {
         self.with_white_box(Box::new(controller))
     }
@@ -230,8 +231,8 @@ impl GameBuilder {
     /// # Returns
     ///
     /// This builder for chaining.
-    pub fn with_black_box(mut self, controller: Box<dyn Controller>)
-            -> GameBuilder {
+    pub fn with_black_box(mut self, controller: Box<dyn Controller<H>>)
+            -> GameBuilder<H> {
         self.black = Some(controller);
         self
     }
@@ -249,9 +250,9 @@ impl GameBuilder {
     /// # Returns
     ///
     /// This builder for chaining.
-    pub fn with_black<C>(self, controller: C) -> GameBuilder
+    pub fn with_black<C>(self, controller: C) -> GameBuilder<H>
     where
-        C: Controller + 'static
+        C: Controller<H> + 'static
     {
         self.with_black_box(Box::new(controller))
     }
@@ -267,8 +268,8 @@ impl GameBuilder {
     /// # Returns
     ///
     /// This builder for chaining.
-    pub fn with_observer_box(mut self, observer: Box<dyn Observer>)
-            -> GameBuilder {
+    pub fn with_observer_box(mut self, observer: Box<dyn Observer<H>>)
+            -> GameBuilder<H> {
         self.observers.push(observer);
         self
     }
@@ -284,9 +285,9 @@ impl GameBuilder {
     /// # Returns
     ///
     /// This builder for chaining.
-    pub fn with_observer<O>(self, observer: O) -> GameBuilder
+    pub fn with_observer<O>(self, observer: O) -> GameBuilder<H>
     where
-        O: Observer + 'static
+        O: Observer<H> + 'static
     {
         self.with_observer_box(Box::new(observer))
     }
@@ -304,7 +305,7 @@ impl GameBuilder {
     /// # Errors
     ///
     /// Any [BuildGameError] according to their documentation.
-    pub fn build(self) -> BuildGameResult<Game> {
+    pub fn build(self) -> BuildGameResult<Game<H>> {
         let white = self.white
             .ok_or(BuildGameError::MissingController(Player::White))?;
         let black = self.black
