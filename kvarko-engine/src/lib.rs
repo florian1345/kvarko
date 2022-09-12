@@ -10,7 +10,7 @@ use std::cmp::Ordering;
 use std::iter;
 
 use crate::book::OpeningBook;
-use crate::ttable::{ValueBound, TranspositionTable, TTableHash, TreeSearchTableEntry, DepthAndBound, ReplacementPolicy};
+use crate::ttable::{ValueBound, TranspositionTable, TTableHash, TreeSearchTableEntry, DepthAndBound, ReplacementPolicy, TTableEntry, QuiescenceTableEntry, AlwaysReplace};
 
 pub mod book;
 pub mod ttable;
@@ -350,45 +350,104 @@ impl ListMovesIn for ListNonPawnCapturesIn {
 
 const QUIESCENSE_BUFFER_COUNT: usize = 15;
 
-/// A [BaseEvaluator] which does quiescense search on all moves provided by
-/// some [ListMovesIn] implementation. This searches the full tree, without any
-/// maximum depth. Alpha-beta-pruning is still applied.
-#[derive(Clone)]
-pub struct QuiescenseTreeSearchEvaluator<E, L> {
-    base_evaluator: E,
-    list_moves_in: L,
-    bufs: Vec<Vec<Move>>
-}
-
-impl<E, L> QuiescenseTreeSearchEvaluator<E, L> {
-
-    pub fn new(base_evaluator: E, list_moves_in: L)
-            -> QuiescenseTreeSearchEvaluator<E, L> {
-        QuiescenseTreeSearchEvaluator {
-            base_evaluator,
-            list_moves_in,
-            bufs: iter::repeat_with(Vec::new).take(QUIESCENSE_BUFFER_COUNT).collect()
+/// Applies the information stored in `entry` to the given alpha and beta
+/// bounds. If an early return is possible, `true` is returned.
+fn process_ttable_entry<E>(alpha: &mut f32, beta: &mut f32,
+    entry: &E) -> bool
+where
+    E: TTableEntry
+{
+    match entry.bound() {
+        ValueBound::Exact => {
+            true
+        },
+        ValueBound::Lower => {
+            if entry.eval() >= *beta {
+                true
+            }
+            else {
+                *alpha = alpha.max(entry.eval());
+                false
+            }
+        },
+        ValueBound::Upper => {
+            if entry.eval() <= *alpha {
+                true
+            }
+            else {
+                *beta = beta.min(entry.eval());
+                false
+            }
         }
     }
 }
 
-impl<H, E, L> BaseEvaluator<H> for QuiescenseTreeSearchEvaluator<E, L>
+/// A [BaseEvaluator] which does quiescense search on all moves provided by
+/// some [ListMovesIn] implementation. This searches the full tree, without any
+/// maximum depth. Alpha-beta-pruning is still applied.
+#[derive(Clone)]
+pub struct QuiescenseTreeSearchEvaluator<H, E, L>
 where
     H: PositionHasher,
+    H::Hash: TTableHash
+{
+    base_evaluator: E,
+    list_moves_in: L,
+    bufs: Vec<Vec<Move>>,
+    transposition_table:
+        TranspositionTable<H, QuiescenceTableEntry, AlwaysReplace>
+}
+
+impl<H, E, L> QuiescenseTreeSearchEvaluator<H, E, L>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash
+{
+
+    pub fn new(base_evaluator: E, list_moves_in: L, ttable_bits: u32)
+            -> QuiescenseTreeSearchEvaluator<H, E, L> {
+        QuiescenseTreeSearchEvaluator {
+            base_evaluator,
+            list_moves_in,
+            bufs: iter::repeat_with(Vec::new)
+                .take(QUIESCENSE_BUFFER_COUNT)
+                .collect(),
+            transposition_table:
+                TranspositionTable::new(ttable_bits, AlwaysReplace)
+        }
+    }
+}
+
+impl<H, E, L> BaseEvaluator<H> for QuiescenseTreeSearchEvaluator<H, E, L>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash,
     E: BaseEvaluator<H>,
     L: ListMovesIn
 {
     fn evaluate_state(&mut self, state: &mut State<H>, alpha: f32, beta: f32,
             _: Option<usize>, _: Option<bool>) -> f32 {
 
-        fn evaluate_rec<H, E, L>(base_evaluator: &mut E, list_moves_in: &mut L,
-            state: &mut State<H>, bufs: &mut [Vec<Move>], mut alpha: f32,
-            beta: f32) -> f32
+        fn evaluate_rec<H, E, L, R>(base_evaluator: &mut E,
+            list_moves_in: &mut L, state: &mut State<H>,
+            bufs: &mut [Vec<Move>], mut alpha: f32, mut beta: f32,
+            ttable: &mut TranspositionTable<H, QuiescenceTableEntry, R>)
+            -> (f32, ValueBound)
         where
             H: PositionHasher,
+            H::Hash: TTableHash,
             E: BaseEvaluator<H>,
-            L: ListMovesIn
+            L: ListMovesIn,
+            R: ReplacementPolicy<QuiescenceTableEntry>
         {
+            let entry = ttable.get_entry(state.position_hash());
+    
+            if let Some(entry) = entry {
+                if process_ttable_entry(&mut alpha, &mut beta, entry) {
+                    return (entry.eval, entry.bound);
+                }
+            }
+
             // TODO reduce code duplication
 
             let (moves, bufs_rest) = bufs.split_first_mut().unwrap();
@@ -400,28 +459,41 @@ where
 
             let mut max = base_evaluator.evaluate_state(
                 state, alpha, beta, Some(move_count), Some(check));
+            let mut bound = ValueBound::Exact;
 
             for mov in moves {
                 let revert_info = state.make_move(&mov);
-                let value = -evaluate_rec(
+                let (value, rec_bound) = evaluate_rec(
                     base_evaluator, list_moves_in, state, bufs_rest,
-                    -beta, -alpha);
+                    -beta, -alpha, ttable);
+                let value = -value;
                 state.unmake_move(&mov, revert_info);
 
-                max = max.max(value);
+                if value > max {
+                    max = value;
+                    bound = rec_bound.invert();
+                }
+
                 alpha = alpha.max(max);
 
                 if alpha >= beta {
+                    bound = ValueBound::Lower;
                     break;
                 }
             }
 
-            max
+            ttable.enter(
+                state.position_hash(), QuiescenceTableEntry {
+                    eval: max,
+                    bound
+                });
+
+            (max, bound)
         }
             
         evaluate_rec(
             &mut self.base_evaluator, &mut self.list_moves_in, state,
-            &mut self.bufs, alpha, beta)
+            &mut self.bufs, alpha, beta, &mut self.transposition_table).0
     }
 }
 
@@ -495,34 +567,10 @@ impl<E> TreeSearchEvaluator<E> {
 
         if let Some(entry) = entry {
             if depth <= self.search_depth + 1 - NO_TRANSPOSITION_SEARCH &&
-                    entry.depth >= depth {
-                match entry.bound {
-                    ValueBound::Exact => {
-                        let mov = entry.recommended_move.clone();
-        
-                        return (entry.eval, Some(mov), entry.bound)
-                    },
-                    ValueBound::Lower => {
-                        if entry.eval >= beta {
-                            let mov = entry.recommended_move.clone();
-            
-                            return (entry.eval, Some(mov), entry.bound)
-                        }
-                        else {
-                            alpha = alpha.max(entry.eval);
-                        }
-                    },
-                    ValueBound::Upper => {
-                        if entry.eval <= alpha {
-                            let mov = entry.recommended_move.clone();
-            
-                            return (entry.eval, Some(mov), entry.bound)
-                        }
-                        else {
-                            beta = beta.min(entry.eval);
-                        }
-                    }
-                }
+                    entry.depth >= depth &&
+                    process_ttable_entry(&mut alpha, &mut beta, entry) {
+                let mov = entry.recommended_move.clone();
+                return (entry.eval, Some(mov), entry.bound)
             }
         }
 
@@ -664,8 +712,8 @@ where
     }
 }
 
-type KvarkoEvaluator = TreeSearchEvaluator<QuiescenseTreeSearchEvaluator<
-    KvarkoBaseEvaluator, ListNonPawnCapturesIn>>;
+type KvarkoEvaluator<H> = TreeSearchEvaluator<QuiescenseTreeSearchEvaluator<
+    H, KvarkoBaseEvaluator, ListNonPawnCapturesIn>>;
 
 /// A [StateEvaluator] that represents the totality of functionality contained
 /// in the Kvarko engine. In particular, this uses a [TreeSearchEvaluator]
@@ -675,12 +723,16 @@ type KvarkoEvaluator = TreeSearchEvaluator<QuiescenseTreeSearchEvaluator<
 /// 
 /// Construct this engine using [kvarko_engine].
 #[derive(Clone)]
-pub struct KvarkoEngine {
+pub struct KvarkoEngine<H>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash
+{
     opening_book: Option<OpeningBook>,
-    evaluator: KvarkoEvaluator
+    evaluator: KvarkoEvaluator<H>
 }
 
-impl<H> StateEvaluator<H> for KvarkoEngine
+impl<H> StateEvaluator<H> for KvarkoEngine<H>
 where
     H: PositionHasher,
     H::Hash: TTableHash
@@ -712,14 +764,19 @@ where
 ///
 /// A [StateEvaluatingController] wrapped around a [KvarkoEngine] with the
 /// given parameters.
-pub fn kvarko_engine(depth: u32, opening_book: Option<OpeningBook>)
-        -> StateEvaluatingController<KvarkoEngine> {
+pub fn kvarko_engine<H>(depth: u32, opening_book: Option<OpeningBook>)
+    -> StateEvaluatingController<KvarkoEngine<H>>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash
+{
     StateEvaluatingController(KvarkoEngine {
         opening_book,
         evaluator: TreeSearchEvaluator {
             base_evaluator: QuiescenseTreeSearchEvaluator::new(
                 KvarkoBaseEvaluator::default(),
-                ListNonPawnCapturesIn
+                ListNonPawnCapturesIn,
+                18
             ),
             search_depth: depth,
             ttable_bits: 20

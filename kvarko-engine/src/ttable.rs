@@ -20,7 +20,7 @@ impl TTableHash for u64 {
 /// An enumeration of the different bounds on the evaluation a transposition
 /// table entry can provide. This depends on the amount and kind of pruning
 /// that occurred during its evaluation.
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ValueBound {
 
     /// The value provided is exact given the depth. This is the case if it
@@ -76,6 +76,7 @@ pub trait ReplacementPolicy<E> {
 
 /// A [ReplacementPolicy] that chooses to replace every old value with a new
 /// one when a collision occurs.
+#[derive(Clone, Copy, Debug)]
 pub struct AlwaysReplace;
 
 impl<E> ReplacementPolicy<E> for AlwaysReplace {
@@ -86,6 +87,7 @@ impl<E> ReplacementPolicy<E> for AlwaysReplace {
 
 /// A [ReplacementPolicy] for [TreeSearchTableEntry]s that favours entries with
 /// higher depth and exact bound.
+#[derive(Clone, Copy, Debug)]
 pub struct DepthAndBound;
 
 impl ReplacementPolicy<TreeSearchTableEntry> for DepthAndBound {
@@ -97,9 +99,22 @@ impl ReplacementPolicy<TreeSearchTableEntry> for DepthAndBound {
     }
 }
 
+/// This trait defines the basic information any kind of transposition table
+/// entry should carry.
+pub trait TTableEntry {
+
+    /// Gets the evaluation of found from the search. This may also be a lower
+    /// or upper bound as determined by [TTableEntry::bound].
+    fn eval(&self) -> f32;
+
+    /// Gets the kind [ValueBound] provided in [TTableEntry::eval], that is,
+    /// whether it is a exact value or a lower or upper bound.
+    fn bound(&self) -> ValueBound;
+}
+
 /// A transposition table entry used during ordinary tree search with known
 /// search depth.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TreeSearchTableEntry {
 
     /// The search depth starting from the node for which this entry is made.
@@ -117,12 +132,42 @@ pub struct TreeSearchTableEntry {
     pub bound: ValueBound
 }
 
-#[derive(Clone)]
-pub struct QuiescenseTableEntry {
+impl TTableEntry for TreeSearchTableEntry {
+    fn eval(&self) -> f32 {
+        self.eval
+    }
+
+    fn bound(&self) -> ValueBound {
+        self.bound
+    }
+}
+
+/// A transposition table entry used in quiescence search. As that is done
+/// without tracking an explicit depth and recommended move, these pieces of
+/// information are missing.
+#[derive(Clone, Debug)]
+pub struct QuiescenceTableEntry {
+
+    /// The evaluation found from the quiescence search. This may also be a
+    /// lower or upper bound as determined by [QuiescenceTableEntry::bound].
     pub eval: f32,
+
+    /// The kind [ValueBound] provided in [QuiescenceTableEntry::eval], that
+    /// is, whether it is a exact value or a lower or upper bound.
     pub bound: ValueBound
 }
 
+impl TTableEntry for QuiescenceTableEntry {
+    fn eval(&self) -> f32 {
+        self.eval
+    }
+
+    fn bound(&self) -> ValueBound {
+        self.bound
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct TranspositionTable<H, E, R>
 where
     H: PositionHasher,
