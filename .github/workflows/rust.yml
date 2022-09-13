@@ -18,6 +18,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - name: Dependencies
+      run: sudo apt-get install -y libasound2-dev libudev-dev libxcb-shape0-dev libxcb-xfixes0-dev
     - name: Clippy
       run: |
         rustup component add clippy
