@@ -125,8 +125,8 @@ fn parse_en_passant_file(fen: &str) -> FenResult<usize> {
             let file_char = chars[0];
             let rank_char = chars[1];
 
-            if file_char < 'a' || file_char > 'h' || rank_char < '1' ||
-                    rank_char > '8' {
+            if !('a'..='h').contains(&file_char) ||
+                    !('1'..='8').contains(&rank_char) {
                 Err(FenError::InvalidEnPassantTarget(fen.to_owned()))
             }
             else {
@@ -192,7 +192,7 @@ impl Position {
     /// # Errors
     ///
     /// Any [FenError] that can occur in the parts contained in a position,
-    /// i.e. all except [FenError::ParseFiftyMoveClockError] and
+    /// i.e. all except [FenError::ParseHalfMoveClockError] and
     /// [FenError::ParseFullMoveClockError], as those relate to the move
     /// history.
     pub fn from_fen(fen: &str) -> FenResult<Position> {
@@ -440,8 +440,8 @@ impl Position {
         H: PositionHasher
     {
         let revert_info = PositionRevertInfo {
-            short_castles: self.short_castles.clone(),
-            long_castles: self.long_castles.clone(),
+            short_castles: self.short_castles,
+            long_castles: self.long_castles,
             en_passant_file: self.en_passant_file
         };
 
@@ -449,8 +449,8 @@ impl Position {
             hasher.on_en_passant_disabled(en_passant_file);
         }
 
-        match mov {
-            &Move::Ordinary { moved, captured, delta_mask } => {
+        match *mov {
+            Move::Ordinary { moved, captured, delta_mask } => {
                 match self.turn {
                     Player::White =>
                         self.apply_ordinary_move::<White, _>(
@@ -460,14 +460,14 @@ impl Position {
                             moved, captured, delta_mask, hasher)
                 }
             },
-            &Move::Castle { king_delta_mask, rook_delta_mask } => {
+            Move::Castle { king_delta_mask, rook_delta_mask } => {
                 self.notify_movement(king_delta_mask, Piece::King, None, hasher);
                 self.notify_movement(rook_delta_mask, Piece::Rook, None, hasher);
                 self.disable_short_castling(self.turn, hasher);
                 self.disable_long_castling(self.turn, hasher);
                 self.en_passant_file = usize::MAX;
             },
-            &Move::Promotion { captured, delta_mask, promotion } => {
+            Move::Promotion { captured, delta_mask, promotion } => {
                 let (src, dest) = self.src_dest(delta_mask, self.turn);
 
                 hasher.on_piece_left(Piece::Pawn, self.turn, src);
@@ -488,7 +488,7 @@ impl Position {
 
                 self.en_passant_file = usize::MAX;
             },
-            &Move::EnPassant { delta_mask, target } => {
+            Move::EnPassant { delta_mask, target } => {
                 let (src, dest) = self.src_dest(delta_mask, self.turn);
                 let target = target.min_unchecked();
 
@@ -569,18 +569,18 @@ impl Position {
             hasher.on_en_passant_enabled(revert_info.en_passant_file);
         }
 
-        match mov {
-            &Move::Ordinary { moved, captured, delta_mask } => {
+        match *mov {
+            Move::Ordinary { moved, captured, delta_mask } => {
                 self.notify_inverse_movement(
                     delta_mask, moved, captured, hasher);
             },
-            &Move::Castle { king_delta_mask, rook_delta_mask } => {
+            Move::Castle { king_delta_mask, rook_delta_mask } => {
                 self.notify_inverse_movement(
                     king_delta_mask, Piece::King, None, hasher);
                 self.notify_inverse_movement(
                     rook_delta_mask, Piece::Rook, None, hasher);
             },
-            &Move::Promotion { captured, delta_mask, promotion } => {
+            Move::Promotion { captured, delta_mask, promotion } => {
                 let (src, dest) = self.src_dest(delta_mask, turn);
 
                 hasher.on_piece_left(promotion, turn, src);
@@ -590,7 +590,7 @@ impl Position {
                     hasher.on_piece_entered(captured, turn.opponent(), src);
                 }
             },
-            &Move::EnPassant { delta_mask, target } => {
+            Move::EnPassant { delta_mask, target } => {
                 let (src, dest) = self.src_dest(delta_mask, turn);
                 let target = target.min_unchecked();
 
@@ -665,8 +665,8 @@ impl Position {
     }
 }
 
-const LIGHT_SQUARES: Bitboard = Bitboard(0xcccccccccccccccc);
-const DARK_SQUARES: Bitboard = Bitboard(0x5555555555555555);
+const LIGHT_SQUARES: Bitboard = Bitboard(0x55aa55aa55aa55aa);
+const DARK_SQUARES: Bitboard = Bitboard(0xaa55aa55aa55aa55);
 
 /// An enumeration of the different outcomes a game of Chess can have.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1544,5 +1544,392 @@ mod tests {
         test_move(fen, mov, |state| {
             assert!(state.position().en_passant_file().is_none());
         });
+    }
+
+    #[test]
+    fn checkmate() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │ r │   │ b │ q │ k │ b │   │ r │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ p │ p │ p │ p │   │ p │ p │ p │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ n │   │   │ n │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │ p │   │   │ Q │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ B │   │ P │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ P │ P │ P │ P │   │ P │ P │ P │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ R │ N │ B │   │ K │   │ N │ R │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // White takes the pawn on f7 with the queen, which is checkmate.
+
+        let fen = "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w \
+            KQkq - 0 1";
+        let mov = Move::Ordinary {
+            moved: Piece::Queen,
+            captured: Some(Piece::Pawn),
+            delta_mask: Bitboard(0x0020008000000000)
+        };
+
+        test_move(fen, mov, |state| {
+            assert_eq!(Some(Outcome::Victory(Player::White)),
+                state.compute_outcome());
+        })
+    }
+
+    #[test]
+    fn threefold_repetition() {
+        // Board (black to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │ r │   │ b │ q │ k │ b │ n │ r │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ p │ p │ p │ p │ p │ p │ p │ p │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ n │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ P │ P │ P │ P │ P │ P │ P │ P │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ R │ N │ B │ Q │ K │ B │ N │ R │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // Where the history is as follows.
+        //
+        // 1. Na3 Na6
+        // 2. Nb1 Nb8
+        // 3. Na3 Na6
+        // 4. Nb1
+        //
+        // Black now plays Nb8, which repeats the initial position for the
+        // third time. This causes a draw by repetition.
+
+        let mut state: State<IdHasher> = State::from_algebraic_history(
+            "Na3 Na6 Nb1 Nb8 Na3 Na6 Nb1".split(' ')).unwrap();
+        let mov = Move::Ordinary {
+            moved: Piece::Knight,
+            captured: None,
+            delta_mask: Bitboard(0x0200010000000000)
+        };
+        
+        assert_eq!(None, state.compute_outcome());
+
+        state.make_move(&mov);
+
+        assert_eq!(Some(Outcome::Draw), state.compute_outcome());
+    }
+
+    #[test]
+    fn fifty_move_rule() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ k │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │ p │   │ p │   │   │ p │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ p │   │   │ P │   │   │ P │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ P │   │ P │ K │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // Where 99 half-moves without progress have been made. White moves the
+        // king to e3, triggering a draw by fifty-move-rule.
+
+        let mut state: State<IdHasher> = State::from_fen(
+            "8/8/2k5/1p1p2p1/p2P2P1/P1PK4/8/8 w - - 99 106").unwrap();
+        let mov = Move::Ordinary {
+            moved: Piece::King,
+            captured: None,
+            delta_mask: Bitboard(0x0000000000180000)
+        };
+
+        assert_eq!(None, state.compute_outcome());
+
+        state.make_move(&mov);
+
+        assert_eq!(Some(Outcome::Draw), state.compute_outcome());
+    }
+
+    #[test]
+    fn insufficient_material_king_vs_king() {
+        // Board (black to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ k │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │ K │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // As it is king vs king, the game is a draw by insufficient material.
+
+        let state: State<IdHasher> = State::from_fen(
+            "8/8/2k5/8/5K2/8/8/8 b - - 0 1").unwrap();
+
+        assert_eq!(Some(Outcome::Draw), state.compute_outcome());
+    }
+
+    #[test]
+    fn insufficient_material_knight_vs_king() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ k │ N │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │ K │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // As it is knight and king vs king, the game is a draw by insufficient
+        // material.
+
+        let state: State<IdHasher> = State::from_fen(
+            "8/8/2kN4/8/5K2/8/8/8 w - - 0 1").unwrap();
+
+        assert_eq!(Some(Outcome::Draw), state.compute_outcome());
+    }
+
+    #[test]
+    fn insufficient_material_bishop_vs_king() {
+        // Board (black to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ k │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │ b │ K │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // As it is bishop and king vs king, the game is a draw by insufficient
+        // material.
+
+        let state: State<IdHasher> = State::from_fen(
+            "8/8/2k5/8/4bK2/8/8/8 b - - 0 1").unwrap();
+
+        assert_eq!(Some(Outcome::Draw), state.compute_outcome());
+    }
+
+    #[test]
+    fn insufficient_material_equally_colored_bishops() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ k │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │ B │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │ b │ K │ B │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // While there are three bishops on the board, they are all of the same
+        // color. Hence, the game is a draw by insufficient material.
+
+        let state: State<IdHasher> = State::from_fen(
+            "8/8/2k5/7B/4bKB1/8/8/8 w - - 0 1").unwrap();
+
+        assert_eq!(Some(Outcome::Draw), state.compute_outcome());
+    }
+
+    #[test]
+    fn sufficient_material_opposite_colored_bishops() {
+        // Board (black to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ k │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │ B │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │ b │ K │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // As the two remaining bishops on the board are of opposite colors,
+        // the game is not a draw.
+
+        let state: State<IdHasher> = State::from_fen(
+            "8/8/2k5/6B1/4bKB1/8/8/8 b - - 0 1").unwrap();
+
+        assert_eq!(None, state.compute_outcome());
+    }
+
+    #[test]
+    fn sufficient_material_knight_vs_knight() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ k │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │ n │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │ N │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ K │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // As there are still two knights on the board, the game is not a draw.
+
+        let state: State<IdHasher> = State::from_fen(
+            "8/8/3k4/6n1/6N1/3K4/8/8 w - - 0 1").unwrap();
+
+        assert_eq!(None, state.compute_outcome());
+    }
+
+    #[test]
+    fn sufficient_material_rook_vs_king() {
+        // Board (black to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ k │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │ r │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ K │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // As there is still a rook on the board, the game is not a draw.
+
+        let state: State<IdHasher> = State::from_fen(
+            "8/8/3k4/8/6Q1/3K4/8/8 b - - 0 1").unwrap();
+
+        assert_eq!(None, state.compute_outcome());
+    }
+
+    #[test]
+    fn sufficient_material_queen_vs_king() {
+        // Board (black to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ k │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │ Q │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ K │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // As there is still a queen on the board, the game is not a draw.
+
+        let state: State<IdHasher> = State::from_fen(
+            "8/8/3k4/8/6Q1/3K4/8/8 b - - 0 1").unwrap();
+
+        assert_eq!(None, state.compute_outcome());
+    }
+
+    #[test]
+    fn sufficient_material_pawn_vs_king() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ k │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │ P │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ K │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // As there is still a pawn on the board, the game is not a draw.
+
+        let state: State<IdHasher> = State::from_fen(
+            "8/8/3k4/8/6P1/3K4/8/8 w - - 0 1").unwrap();
+
+        assert_eq!(None, state.compute_outcome());
     }
 }

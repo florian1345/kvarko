@@ -295,8 +295,8 @@ impl<H: PositionHasher> GameBuilder<H> {
     /// Constructs the final game with the components provided in previous
     /// method calls. It is required that at least the controllers have been
     /// specified, i.e. [GameBuilder::with_white] or
-    /// [GameBuilder::with_white_boxed] as well as [GameBuilder::with_black] or
-    /// [GameBuilder::with_black_boxed] must have been called before this.
+    /// [GameBuilder::with_white_box] as well as [GameBuilder::with_black] or
+    /// [GameBuilder::with_black_box] must have been called before this.
     ///
     /// # Returns
     ///
@@ -321,5 +321,11 @@ impl<H: PositionHasher> GameBuilder<H> {
         game.init();
 
         Ok(game)
+    }
+}
+
+impl<H: PositionHasher> Default for GameBuilder<H> {
+    fn default() -> GameBuilder<H> {
+        GameBuilder::new()
     }
 }

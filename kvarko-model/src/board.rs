@@ -655,8 +655,7 @@ impl Board {
             return None;
         };
         let piece = *PIECES.iter()
-            .filter(|&&p| !(self.of_kind(p) & mask).is_empty())
-            .next()
+            .find(|&&p| !(self.of_kind(p) & mask).is_empty())
             .expect("no piece in occupied field");
 
         Some((piece, player))
@@ -677,8 +676,8 @@ impl Board {
     where
         F: Fn(Bitboard, Bitboard) -> Bitboard
     {
-        match mov {
-            &Move::Ordinary { moved, captured, delta_mask } => {
+        match *mov {
+            Move::Ordinary { moved, captured, delta_mask } => {
                 let (piece_bb, player_bb) =
                     self.pieces_players_mut(moved, player);
                 let target = get_target(delta_mask, *player_bb);
@@ -688,12 +687,12 @@ impl Board {
 
                 self.apply_capture(captured, target, player);
             },
-            &Move::EnPassant { delta_mask, target } => {
+            Move::EnPassant { delta_mask, target } => {
                 *self.players_mut(player) ^= delta_mask;
                 *self.players_mut(player.opponent()) ^= target;
                 *self.pieces_mut(Piece::Pawn) ^= delta_mask | target;
             },
-            &Move::Promotion { promotion, captured, delta_mask } => {
+            Move::Promotion { promotion, captured, delta_mask } => {
                 let (pawn_bb, player_bb) =
                     self.pieces_players_mut(Piece::Pawn, player);
                 let target = get_target(delta_mask, *player_bb);
@@ -705,7 +704,7 @@ impl Board {
 
                 self.apply_capture(captured, target, player);
             },
-            &Move::Castle { king_delta_mask, rook_delta_mask } => {
+            Move::Castle { king_delta_mask, rook_delta_mask } => {
                 *self.players_mut(player) ^= king_delta_mask | rook_delta_mask;
                 *self.pieces_mut(Piece::King) ^= king_delta_mask;
                 *self.pieces_mut(Piece::Rook) ^= rook_delta_mask;
@@ -756,9 +755,9 @@ impl Board {
     /// `'/'`) is not equal to [BOARD_HEIGHT].
     /// * [FenError::WrongRankSize] if any rank represents a list of fields
     /// which is not equal to [BOARD_WIDTH] in length.
-    /// * [FenError::InvalidPieceChar] if any character that appears in a rank
-    /// does not represent a piece or a gap of valid size (i.e. greater than 0
-    /// and less than [BOARD_WIDTH]).
+    /// * [FenError::InvalidPiece] if any character that appears in a rank does
+    /// not represent a piece or a gap of valid size (i.e. greater than 0 and
+    /// less than [BOARD_WIDTH]).
     pub fn from_fen(fen: &str) -> FenResult<Board> {
         let mut board = Board::empty();
         let ranks = fen.split('/').rev();

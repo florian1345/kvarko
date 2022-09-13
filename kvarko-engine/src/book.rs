@@ -140,4 +140,10 @@ impl OpeningBook {
     pub fn len(&self) -> usize {
         self.map.len()
     }
+
+    /// Indicates whether this opening book is empty, i.e. contains no
+    /// positions.
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
 }

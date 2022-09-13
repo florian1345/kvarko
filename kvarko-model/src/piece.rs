@@ -6,8 +6,8 @@ use crate::error::{FenResult, FenError};
 use serde::{Deserialize, Serialize};
 
 /// An enumeration of the different kinds of pieces on the board. Does not
-/// encode the [Player] who owns the piece. This can be converted to a [usize]
-/// to obtain the piece index.
+/// encode the [Player](crate::player::Player) who owns the piece. This can be
+/// converted to a [usize] to obtain the piece index.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum Piece {
@@ -59,7 +59,7 @@ impl Piece {
     ///
     /// # Errors
     ///
-    /// [FenError::InvalidPieceChar] if the character is not a valid piece
+    /// [FenError::InvalidPiece] if the character is not a valid piece
     /// abbreviation.
     pub fn from_fen_char(c: char) -> FenResult<Piece> {
         match c.to_ascii_lowercase() {
@@ -84,7 +84,7 @@ impl Piece {
         const QUEEN_IDX: usize = Piece::Queen as usize;
 
         let idx = self as usize;
-        idx >= BISHOP_IDX && idx <= QUEEN_IDX
+        (BISHOP_IDX..=QUEEN_IDX).contains(&idx)
     }
 
     /// Converts this piece into its lower case FEN representation.

@@ -10,7 +10,9 @@ mod popup;
 
 pub use game::{GameplayState, HumanController};
 pub use menu::MenuState;
-pub use popup::PopupState;
+pub use popup::{Action, PopupState};
+
+type Changer<S> = Box<dyn FnMut(&mut Context, S) -> DynGameState>;
 
 pub enum Transition {
     None,
@@ -26,8 +28,7 @@ impl Transition {
         S: 'static,
         F: FnMut(&mut Context, S) -> DynGameState + 'static
     {
-        let inner: Box<dyn FnMut(&mut Context, S) -> DynGameState> =
-            Box::new(f);
+        let inner: Changer<S> = Box::new(f);
 
         Transition::Change(Box::new(inner))
     }
@@ -137,9 +138,7 @@ where
     S: GameState + 'static
 {
     fn transform(&mut self, ctx: &mut Context, transformer: Box<dyn Any>) -> DynGameState {
-        let mut transformer:
-            Box<Box<dyn FnMut(&mut Context, S) -> DynGameState>> =
-                transformer.downcast().unwrap();
+        let mut transformer: Box<Changer<S>> = transformer.downcast().unwrap();
         let inner: Box<S> = self.inner.take().unwrap().downcast().unwrap();
 
         transformer(ctx, *inner)
