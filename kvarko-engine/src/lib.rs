@@ -10,7 +10,17 @@ use std::cmp::Ordering;
 use std::iter;
 
 use crate::book::OpeningBook;
-use crate::ttable::{ValueBound, TranspositionTable, TTableHash, TreeSearchTableEntry, DepthAndBound, ReplacementPolicy, TTableEntry, QuiescenceTableEntry, AlwaysReplace};
+use crate::ttable::{
+    AlwaysReplace,
+    DepthAndBound,
+    QuiescenceTableEntry,
+    ReplacementPolicy,
+    TranspositionTable,
+    TreeSearchTableEntry,
+    TTableEntry,
+    TTableHash,
+    ValueBound
+};
 
 pub mod book;
 pub mod ttable;
