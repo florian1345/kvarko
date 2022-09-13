@@ -168,12 +168,16 @@ impl TTableEntry for QuiescenceTableEntry {
 }
 
 #[derive(Clone, Debug)]
+#[allow(clippy::type_complexity)]
 pub struct TranspositionTable<H, E, R>
 where
     H: PositionHasher,
     H::Hash: TTableHash,
     R: ReplacementPolicy<E>
 {
+    // Sadly, we cannot create a type alias for table cells as that does not
+    // allow necessary annotations for the generics.
+
     entries: Box<[Option<(H::Hash, E)>]>,
     mask: usize,
     replacement_policy: R
@@ -209,7 +213,7 @@ where
         let entry = &mut self.entries[idx];
 
         if let Some((_, entry)) = entry {
-            if !self.replacement_policy.replace(&entry, &new_entry) {
+            if !self.replacement_policy.replace(entry, &new_entry) {
                 return;
             }
         }

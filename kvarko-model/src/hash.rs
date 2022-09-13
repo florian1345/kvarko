@@ -254,7 +254,7 @@ where
     type Hash = H;
 
     fn init(position: &Position) -> ZobristHasher<H> {
-        ZobristHasher::new(SEED.clone(), position)
+        ZobristHasher::new(SEED, position)
     }
 
     fn hash(&self, _position: &Position) -> H {

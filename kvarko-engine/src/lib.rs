@@ -150,26 +150,6 @@ pub struct KvarkoBaseEvaluator {
 
 impl KvarkoBaseEvaluator {
 
-    pub fn new(pawn_value: f32, knight_value: f32, bishop_value: f32,
-            rook_value: f32, queen_value: f32, move_value: f32,
-            doubled_pawn_penalty: f32, pawn_sixth_rank_value: f32,
-            pawn_seventh_rank_value: f32) -> KvarkoBaseEvaluator {
-        KvarkoBaseEvaluator {
-            values: [
-                pawn_value,
-                knight_value,
-                bishop_value,
-                rook_value,
-                queen_value,
-                10.0
-            ],
-            move_value,
-            doubled_pawn_penalty,
-            pawn_sixth_rank_value,
-            pawn_seventh_rank_value
-        }
-    }
-
     #[inline]
     fn evaluate_pawn_ranks(&self, player: Player, pawns: Bitboard) -> f32 {
         let sixth_rank_pawns;
@@ -195,7 +175,7 @@ impl Default for KvarkoBaseEvaluator {
 
     fn default() -> KvarkoBaseEvaluator {
         KvarkoBaseEvaluator {
-            values: DEFAULT_MATERIAL_VALUES.clone(),
+            values: DEFAULT_MATERIAL_VALUES,
             move_value: DEFAULT_MOVE_VALUE,
             doubled_pawn_penalty: DEFAULT_DOUBLED_PAWN_PENALTY,
             pawn_sixth_rank_value: DEFAULT_PAWN_SIXTH_RANK_VALUE,
@@ -335,8 +315,8 @@ impl ListMovesIn for ListNonPawnCapturesIn {
             fn process(&mut self, mov: Move) {
                 self.count += 1;
                 let captured = match &mov {
-                    Move::Ordinary { captured, .. } => captured.clone(),
-                    Move::Promotion { captured, .. } => captured.clone(),
+                    Move::Ordinary { captured, .. } => *captured,
+                    Move::Promotion { captured, .. } => *captured,
                     _ => None
                 };
 
@@ -462,8 +442,8 @@ where
 
             let (moves, bufs_rest) = bufs.split_first_mut().unwrap();
             moves.clear();
-            let (check, move_count) = list_moves_in.list_moves_in(&state.position(), moves);
-            moves.sort_by_cached_key(|m| estimate_move(m));
+            let (check, move_count) = list_moves_in.list_moves_in(state.position(), moves);
+            moves.sort_by_cached_key(estimate_move);
 
             // Actor can stop trading now, if they want.
 
@@ -472,12 +452,12 @@ where
             let mut bound = ValueBound::Exact;
 
             for mov in moves {
-                let revert_info = state.make_move(&mov);
+                let revert_info = state.make_move(mov);
                 let (value, rec_bound) = evaluate_rec(
                     base_evaluator, list_moves_in, state, bufs_rest,
                     -beta, -alpha, ttable);
                 let value = -value;
-                state.unmake_move(&mov, revert_info);
+                state.unmake_move(mov, revert_info);
 
                 if value > max {
                     max = value;
@@ -542,7 +522,7 @@ fn estimate_move(mov: &Move) -> OrdF32 {
                 OrdF32(0.0)
             }
         },
-        Move::EnPassant { .. } => return OrdF32(-1.0),
+        Move::EnPassant { .. } => OrdF32(-1.0),
         &Move::Promotion { promotion, captured, .. } => {
             let mut value = DEFAULT_MATERIAL_VALUES[promotion as usize];
 
@@ -591,7 +571,7 @@ impl<E> TreeSearchEvaluator<E> {
         else {
             let (moves, bufs_rest) = bufs.split_first_mut().unwrap();
             moves.clear();
-            let check = movement::list_moves_in(&state.position(), moves);
+            let check = movement::list_moves_in(state.position(), moves);
 
             if moves.is_empty() {
                 if check {
@@ -611,7 +591,7 @@ impl<E> TreeSearchEvaluator<E> {
                 });
             }
             else {
-                moves.sort_by_cached_key(|m| estimate_move(m));
+                moves.sort_by_cached_key(estimate_move);
             }
 
             let mut max = f32::NEG_INFINITY;
@@ -619,11 +599,11 @@ impl<E> TreeSearchEvaluator<E> {
             let mut bound = ValueBound::Exact;
 
             for mov in moves {
-                let revert_info = state.make_move(&mov);
+                let revert_info = state.make_move(mov);
                 let (rec_value, _, rec_bound) =
                     self.evaluate_rec(state, bufs_rest, -beta, -alpha, ttable);
                 let mut value = -rec_value;
-                state.unmake_move(&mov, revert_info);
+                state.unmake_move(mov, revert_info);
 
                 // Longer checkmate sequences have lower value.
 

@@ -1,4 +1,4 @@
-use crate::state::{GameState, PopupState, Transition, DynGameState};
+use crate::state::{Action, GameState, PopupState, Transition, DynGameState};
 use crate::sync::{Requester, self, Responder, ResponseHandle};
 use crate::ui::Button;
 
@@ -355,11 +355,14 @@ impl EventHandler for GameplayState {
                     .cloned()
                     .collect::<Vec<_>>();
 
-                if moves.len() == 1 {
-                    self.make_move(moves.into_iter().next().unwrap());
-                }
-                else if moves.len() > 1 {
-                    self.awaiting_moves = Some(moves);
+                match moves.len() {
+                    1 => {
+                        self.make_move(moves.into_iter().next().unwrap());
+                    },
+                    2.. => {
+                        self.awaiting_moves = Some(moves);
+                    },
+                    _ => { }
                 }
             }
         }
@@ -393,7 +396,7 @@ impl GameState for GameplayState {
 
     fn transition(&mut self, _ctx: &mut Context) -> Transition {
         if let Some(awaiting_moves) = &self.awaiting_moves {
-            let mut buttons: Vec<(Button, Box<dyn FnMut(&mut GameplayState)>)> = awaiting_moves.iter()
+            let mut buttons: Vec<(Button, Action<GameplayState>)> = awaiting_moves.iter()
                 .map(|m| {
                     let piece = match m {
                         Move::Promotion { promotion, .. } => *promotion,
@@ -414,12 +417,11 @@ impl GameState for GameplayState {
                             if let Some(awaiting_moves) =
                                     this.awaiting_moves.take() {
                                 let mov = awaiting_moves.into_iter()
-                                    .filter(|m| match m {
+                                    .find(|m| match m {
                                         Move::Promotion { promotion, .. } =>
                                             *promotion == piece,
                                         _ => false
-                                    })
-                                    .next();
+                                    });
                                 
                                 if let Some(mov) = mov {
                                     this.make_move(mov);
@@ -445,7 +447,7 @@ impl GameState for GameplayState {
             ok_button.set_bounds([size, size], Align::Center);
             let ok_button =
                 Button::new(button_rect(), Color::WHITE, "Ok".into(), 32.0);
-            let mut buttons: Vec<(Button, Box<dyn FnMut(&mut GameplayState)>)> =
+            let mut buttons: Vec<(Button, Action<GameplayState>)> =
                 vec![(ok_button, Box::new(|_| { }))];
 
             Transition::change(move |ctx, this: GameplayState|

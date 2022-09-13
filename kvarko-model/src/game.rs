@@ -323,3 +323,9 @@ impl<H: PositionHasher> GameBuilder<H> {
         Ok(game)
     }
 }
+
+impl<H: PositionHasher> Default for GameBuilder<H> {
+    fn default() -> GameBuilder<H> {
+        GameBuilder::new()
+    }
+}

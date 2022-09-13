@@ -125,8 +125,8 @@ fn parse_en_passant_file(fen: &str) -> FenResult<usize> {
             let file_char = chars[0];
             let rank_char = chars[1];
 
-            if file_char < 'a' || file_char > 'h' || rank_char < '1' ||
-                    rank_char > '8' {
+            if !('a'..='h').contains(&file_char) ||
+                    !('1'..='8').contains(&rank_char) {
                 Err(FenError::InvalidEnPassantTarget(fen.to_owned()))
             }
             else {
@@ -440,8 +440,8 @@ impl Position {
         H: PositionHasher
     {
         let revert_info = PositionRevertInfo {
-            short_castles: self.short_castles.clone(),
-            long_castles: self.long_castles.clone(),
+            short_castles: self.short_castles,
+            long_castles: self.long_castles,
             en_passant_file: self.en_passant_file
         };
 
@@ -449,8 +449,8 @@ impl Position {
             hasher.on_en_passant_disabled(en_passant_file);
         }
 
-        match mov {
-            &Move::Ordinary { moved, captured, delta_mask } => {
+        match *mov {
+            Move::Ordinary { moved, captured, delta_mask } => {
                 match self.turn {
                     Player::White =>
                         self.apply_ordinary_move::<White, _>(
@@ -460,14 +460,14 @@ impl Position {
                             moved, captured, delta_mask, hasher)
                 }
             },
-            &Move::Castle { king_delta_mask, rook_delta_mask } => {
+            Move::Castle { king_delta_mask, rook_delta_mask } => {
                 self.notify_movement(king_delta_mask, Piece::King, None, hasher);
                 self.notify_movement(rook_delta_mask, Piece::Rook, None, hasher);
                 self.disable_short_castling(self.turn, hasher);
                 self.disable_long_castling(self.turn, hasher);
                 self.en_passant_file = usize::MAX;
             },
-            &Move::Promotion { captured, delta_mask, promotion } => {
+            Move::Promotion { captured, delta_mask, promotion } => {
                 let (src, dest) = self.src_dest(delta_mask, self.turn);
 
                 hasher.on_piece_left(Piece::Pawn, self.turn, src);
@@ -488,7 +488,7 @@ impl Position {
 
                 self.en_passant_file = usize::MAX;
             },
-            &Move::EnPassant { delta_mask, target } => {
+            Move::EnPassant { delta_mask, target } => {
                 let (src, dest) = self.src_dest(delta_mask, self.turn);
                 let target = target.min_unchecked();
 
@@ -569,18 +569,18 @@ impl Position {
             hasher.on_en_passant_enabled(revert_info.en_passant_file);
         }
 
-        match mov {
-            &Move::Ordinary { moved, captured, delta_mask } => {
+        match *mov {
+            Move::Ordinary { moved, captured, delta_mask } => {
                 self.notify_inverse_movement(
                     delta_mask, moved, captured, hasher);
             },
-            &Move::Castle { king_delta_mask, rook_delta_mask } => {
+            Move::Castle { king_delta_mask, rook_delta_mask } => {
                 self.notify_inverse_movement(
                     king_delta_mask, Piece::King, None, hasher);
                 self.notify_inverse_movement(
                     rook_delta_mask, Piece::Rook, None, hasher);
             },
-            &Move::Promotion { captured, delta_mask, promotion } => {
+            Move::Promotion { captured, delta_mask, promotion } => {
                 let (src, dest) = self.src_dest(delta_mask, turn);
 
                 hasher.on_piece_left(promotion, turn, src);
@@ -590,7 +590,7 @@ impl Position {
                     hasher.on_piece_entered(captured, turn.opponent(), src);
                 }
             },
-            &Move::EnPassant { delta_mask, target } => {
+            Move::EnPassant { delta_mask, target } => {
                 let (src, dest) = self.src_dest(delta_mask, turn);
                 let target = target.min_unchecked();
 

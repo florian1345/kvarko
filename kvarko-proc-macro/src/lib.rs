@@ -164,9 +164,9 @@ fn gen_occupancies(premask: u64) -> Vec<u64> {
     for bit_set in 0..(1u64 << ones) {
         let mut occupancy = 0;
 
-        for bit_idx in 0..ones {
+        for (bit_idx, &bit) in bits.iter().enumerate() {
             if (1 << bit_idx) & bit_set != 0 {
-                occupancy |= bits[bit_idx];
+                occupancy |= bit;
             }
         }
 

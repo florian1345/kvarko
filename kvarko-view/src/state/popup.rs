@@ -17,9 +17,11 @@ const POPUP_TEXT_H: f32 = 0.05;
 const POPUP_BUTTON_Y: f32 = 0.6;
 const POPUP_BUTTON_MARGIN: f32 = 0.02;
 
+pub type Action<S> = Box<dyn FnMut(&mut S)>;
+
 pub struct PopupState<S> {
     parent: Option<S>,
-    ui: Ui<Option<Box<dyn FnMut(&mut S)>>>
+    ui: Ui<Option<Action<S>>>
 }
 
 impl<S: 'static> PopupState<S> {
@@ -27,8 +29,7 @@ impl<S: 'static> PopupState<S> {
     /// Takes the displayed text and a list of buttons, and constructs a popup
     /// state. The buttons are repositioned to match the layout.
     pub fn new(ctx: &Context, parent: S, text: &str,
-            buttons: Vec<(Button, Box<dyn FnMut(&mut S)>)>)
-            -> PopupState<S> {
+            buttons: Vec<(Button, Action<S>)>) -> PopupState<S> {
         let mut ui = Ui::new(None);
         let screen = graphics::screen_coordinates(ctx);
         let button_margin = POPUP_BUTTON_MARGIN * screen.w;
@@ -39,7 +40,7 @@ impl<S: 'static> PopupState<S> {
         let y = screen.h * POPUP_BUTTON_Y;
 
         for (mut button, callback) in buttons {
-            let mut bounds = button.dimensions().clone();
+            let mut bounds = *button.dimensions();
             bounds.x = x;
             bounds.y = y;
             button.set_dimensions(bounds);

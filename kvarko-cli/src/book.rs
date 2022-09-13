@@ -53,7 +53,7 @@ impl DatabaseTree {
             Outcome::Draw => self.draws += 1
         }
 
-        if moves.len() > 0 {
+        if !moves.is_empty() {
             let entry =
                 self.children.iter_mut().find(|(key, _)| key == &moves[0]);
             let child = 
@@ -128,7 +128,7 @@ impl DatabaseTree {
             })
             .unwrap().0.clone();
         let best_move = &format!("{}", best_move);
-        let best_move = Move::parse_algebraic(state.position(), &best_move)?;
+        let best_move = Move::parse_algebraic(state.position(), best_move)?;
 
         book.add_entry(&*state, value, best_move);
 
@@ -220,26 +220,26 @@ impl Visitor for GameCollector {
 
 #[derive(Debug)]
 pub enum MakeBookError {
-    IoError(io::Error),
-    AlgebraicError(AlgebraicError),
-    BincodeError(bincode::Error)
+    Io(io::Error),
+    Algebraic(AlgebraicError),
+    Bincode(bincode::Error)
 }
 
 impl From<io::Error> for MakeBookError {
     fn from(e: io::Error) -> MakeBookError {
-        MakeBookError::IoError(e)
+        MakeBookError::Io(e)
     }
 }
 
 impl From<AlgebraicError> for MakeBookError {
     fn from(e: AlgebraicError) -> MakeBookError {
-        MakeBookError::AlgebraicError(e)
+        MakeBookError::Algebraic(e)
     }
 }
 
 impl From<bincode::Error> for MakeBookError {
     fn from(e: bincode::Error) -> MakeBookError {
-        MakeBookError::BincodeError(e)
+        MakeBookError::Bincode(e)
     }
 }
 

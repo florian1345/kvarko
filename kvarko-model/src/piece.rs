@@ -84,7 +84,7 @@ impl Piece {
         const QUEEN_IDX: usize = Piece::Queen as usize;
 
         let idx = self as usize;
-        idx >= BISHOP_IDX && idx <= QUEEN_IDX
+        (BISHOP_IDX..=QUEEN_IDX).contains(&idx)
     }
 
     /// Converts this piece into its lower case FEN representation.

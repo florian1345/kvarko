@@ -10,7 +10,7 @@ mod popup;
 
 pub use game::{GameplayState, HumanController};
 pub use menu::MenuState;
-pub use popup::PopupState;
+pub use popup::{Action, PopupState};
 
 pub enum Transition {
     None,

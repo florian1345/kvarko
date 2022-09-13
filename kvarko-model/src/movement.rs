@@ -45,9 +45,8 @@ fn get_pawn_push<D: StaticPlayer>(occupancy: Bitboard,
 
 fn get_pawn_attack<D: StaticPlayer>(pawns: Bitboard) -> Bitboard {
     let straight = D::forward(pawns);
-    let diagonal =
-        ((straight << 1) & !LEFT_FILE) | ((straight >> 1) & !RIGHT_FILE);
-    diagonal
+
+    ((straight << 1) & !LEFT_FILE) | ((straight >> 1) & !RIGHT_FILE)
 }
 
 fn get_bishop_attack(occupancy: Bitboard, square: Location) -> Bitboard {
@@ -92,19 +91,19 @@ fn parse_complete_or_not_final_position(chars: &mut Peekable<Chars>)
     let mut rank = None;
 
     match chars.peek() {
-        Some(&c) if c >= 'a' && c <= 'h' => {
+        Some(&c) if ('a'..='h').contains(&c) => {
             file = Some(c as usize - 'a' as usize);
             chars.next();
             
             let c = *chars.peek()
                 .ok_or(AlgebraicError::IncompleteDestination)?;
 
-            if c >= '1' && c <= '8' {
+            if ('1'..='8').contains(&c) {
                 rank = Some(c as usize - '1' as usize);
                 chars.next();
             }
         },
-        Some(&c) if c >= '1' && c <= '8' => {
+        Some(&c) if ('1'..='8').contains(&c) => {
             rank = Some(c as usize - '1' as usize);
             chars.next();
         },
@@ -158,7 +157,7 @@ impl AlgebraicMove {
         // TODO use if-let chain
 
         if let Some(&c) = chars.peek() {
-            if c >= 'a' && c <= 'h' {
+            if ('a'..='h').contains(&c) {
                 src_file = dest_file;
                 src_rank = dest_rank;
                 (dest_file, dest_rank) =
@@ -601,9 +600,9 @@ fn compute_opponent_attack_mask(position: &Position) -> Bitboard {
     let occupancy = turn_pieces_no_king | board.of_player(opponent);
     let mut attack = match opponent {
         Player::White =>
-            compute_pawn_attack_mask::<White>(&board, opponent),
+            compute_pawn_attack_mask::<White>(board, opponent),
         Player::Black =>
-            compute_pawn_attack_mask::<Black>(&board, opponent)
+            compute_pawn_attack_mask::<Black>(board, opponent)
     };
 
     // TODO reduce duplication
@@ -711,6 +710,7 @@ fn compute_king_attackers(board: &Board, player: Player) -> KingAttackers {
 /// location, but only in the direction of pins. As an example, for diagonal
 /// pins, this does not need to consider push moves, only captures and en
 /// passant.
+#[allow(clippy::too_many_arguments)] // TODO clippy has a point here
 fn generate_directional_pin_moves<P, GetAt, GenPawn>(processor: &mut P,
     board: &Board, player: Player, mask: Bitboard, king_location: Location,
     get_attack: GetAt, non_queen_slider: Piece, generate_pawn_moves: GenPawn)
