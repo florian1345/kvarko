@@ -40,7 +40,7 @@ impl Player {
     ///
     /// # Errors
     ///
-    /// [FenError::InvalidTurnSpecifier] if `c` is neither `"w"` nor `"b"`.
+    /// [FenError::InvalidTurn] if `c` is neither `"w"` nor `"b"`.
     pub fn from_fen_turn_specifier(fen: &str) -> FenResult<Player> {
         match fen {
             "w" => Ok(Player::White),

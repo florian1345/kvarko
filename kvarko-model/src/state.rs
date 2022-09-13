@@ -192,7 +192,7 @@ impl Position {
     /// # Errors
     ///
     /// Any [FenError] that can occur in the parts contained in a position,
-    /// i.e. all except [FenError::ParseFiftyMoveClockError] and
+    /// i.e. all except [FenError::ParseHalfMoveClockError] and
     /// [FenError::ParseFullMoveClockError], as those relate to the move
     /// history.
     pub fn from_fen(fen: &str) -> FenResult<Position> {

@@ -755,9 +755,9 @@ impl Board {
     /// `'/'`) is not equal to [BOARD_HEIGHT].
     /// * [FenError::WrongRankSize] if any rank represents a list of fields
     /// which is not equal to [BOARD_WIDTH] in length.
-    /// * [FenError::InvalidPieceChar] if any character that appears in a rank
-    /// does not represent a piece or a gap of valid size (i.e. greater than 0
-    /// and less than [BOARD_WIDTH]).
+    /// * [FenError::InvalidPiece] if any character that appears in a rank does
+    /// not represent a piece or a gap of valid size (i.e. greater than 0 and
+    /// less than [BOARD_WIDTH]).
     pub fn from_fen(fen: &str) -> FenResult<Board> {
         let mut board = Board::empty();
         let ranks = fen.split('/').rev();
