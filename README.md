@@ -17,6 +17,11 @@ It is implemented as a controller for the `kvarko-model`.
 * `kvarko-view` is an application which gives UI access to the Kvarko engine.
 * `kvarko-proc-macro` defines auxiliary macros used in some of the other crates.
 
+# Building
+
+The `kvarko-view` package relies on the [`ggez`](https://ggez.rs/) game engine, which carries some dependencies.
+Further, the executable assumes the `resources` directory to be in the execution path, which can be taken from the `kvarko-view` directory in this repository.
+
 # Magic numbers
 
 A part of this project is a set of numbers used for generating [Magic Bitboards](https://www.chessprogramming.org/Magic_Bitboards).
