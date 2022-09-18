@@ -1,6 +1,3 @@
-use std::convert::TryInto;
-use std::iter;
-
 use kvarko_model::board::Bitboard;
 use kvarko_model::movement::Move;
 use kvarko_model::piece::{PIECE_COUNT, Piece};
@@ -130,6 +127,11 @@ const MAX_PIECE_CAPTURE_VALUE: u8 = const_max(
     const_max(
         ROOK_CAPTURE_VALUE,
         QUEEN_KING_CAPTURE_VALUE));
+const NULL_MOVE: Move = Move::Ordinary {
+    moved: Piece::Pawn,
+    captured: None,
+    delta_mask: Bitboard::EMPTY
+};
 
 const fn piece_capture_value(piece: Piece) -> u8 {
     CAPTURE_VALUES[piece as usize]
@@ -185,12 +187,12 @@ impl CaptureValue {
     }
 }
 
-impl Countable for (CaptureValue, u8) {
+impl Countable for (CaptureValue, Move) {
 
     const COUNT: usize =
         CaptureValue::promotion_capture(Piece::Queen, Piece::Queen).0 as usize + 1;
 
-    const ZERO: (CaptureValue, u8) = (CaptureValue(0), 0);
+    const ZERO: (CaptureValue, Move) = (CaptureValue(0), NULL_MOVE);
 
     type IndexArray = Box<[u8; Self::COUNT]>;
 
@@ -207,25 +209,15 @@ impl Countable for (CaptureValue, u8) {
 
 #[derive(Clone, Debug)]
 pub struct CaptureValuePresorter {
-    counter_sort: CounterSort<(CaptureValue, u8)>,
-    in_buf: Box<[(CaptureValue, u8); LEN_UPPER_BOUND]>,
-    move_buf: Box<[Move; LEN_UPPER_BOUND]>
+    counter_sort: CounterSort<(CaptureValue, Move)>,
+    in_buf: Box<[(CaptureValue, Move); LEN_UPPER_BOUND]>
 }
 
 impl CaptureValuePresorter {
     pub fn new() -> CaptureValuePresorter {
         CaptureValuePresorter {
             counter_sort: CounterSort::new(),
-            in_buf: Box::new([(CaptureValue(0), 0); LEN_UPPER_BOUND]),
-            move_buf: Box::new(iter::repeat_with(|| Move::Ordinary {
-                    moved: Piece::Pawn,
-                    captured: None,
-                    delta_mask: Bitboard::EMPTY }
-                )
-                .take(LEN_UPPER_BOUND)
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap())
+            in_buf: Box::new([(CaptureValue(0), NULL_MOVE); LEN_UPPER_BOUND])
         }
     }
 }
@@ -234,21 +226,15 @@ impl Presorter for CaptureValuePresorter {
     fn pre_sort(&mut self, moves: &mut [Move], _: &Position) {
         let len = moves.len();
 
-        for i in 0..len {
-            self.in_buf[i] = (CaptureValue::from_move(&moves[i]), i as u8);
+        for (i, &mov) in moves.iter().enumerate() {
+            self.in_buf[i] = (CaptureValue::from_move(&mov), mov);
         }
 
         self.counter_sort.sort(&self.in_buf[..len]);
         let out = &self.counter_sort.out()[..len];
 
-        for (buf_idx, &(_, mov_idx)) in out.iter().enumerate() {
-            // CounterSort sorts ascending, but we need descending
-            // => invert index by taking len - mov_idx - 1
-
-            let mov_idx = len - mov_idx as usize - 1;
-            self.move_buf[buf_idx] = moves[mov_idx].clone();
+        for (idx, &(_, mov)) in out.iter().rev().enumerate() {
+            moves[idx] = mov;
         }
-
-        moves.clone_from_slice(&self.move_buf[..len]);
     }
 }

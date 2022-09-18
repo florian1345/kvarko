@@ -232,7 +232,7 @@ impl AlgebraicMove {
 ///
 /// Different kinds of moves are realized as different variants, although most
 /// moves - including captures - are covered by [Move::Ordinary].
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum Move {
 
     /// Any move made by one piece to one destination square which now holds
