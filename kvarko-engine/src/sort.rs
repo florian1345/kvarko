@@ -75,7 +75,7 @@ where
 
         let mut sum = 0;
 
-        for i in 0..=T::COUNT {
+        for i in 0..T::COUNT {
             let value = self.counters.as_slice()[i];
             self.counters.as_mut_slice()[i] = sum;
             sum += value;
@@ -232,18 +232,23 @@ impl CaptureValuePresorter {
 
 impl Presorter for CaptureValuePresorter {
     fn pre_sort(&mut self, moves: &mut [Move], _: &Position) {
-        for i in 0..moves.len() {
+        let len = moves.len();
+
+        for i in 0..len {
             self.in_buf[i] = (CaptureValue::from_move(&moves[i]), i as u8);
         }
 
-        self.counter_sort.sort(&self.in_buf[..moves.len()]);
-        let out = self.counter_sort.out();
+        self.counter_sort.sort(&self.in_buf[..len]);
+        let out = &self.counter_sort.out()[..len];
 
         for (buf_idx, &(_, mov_idx)) in out.iter().enumerate() {
-            let mov_idx = mov_idx as usize;
+            // CounterSort sorts ascending, but we need descending
+            // => invert index by taking len - mov_idx - 1
+
+            let mov_idx = len - mov_idx as usize - 1;
             self.move_buf[buf_idx] = moves[mov_idx].clone();
         }
 
-        moves.clone_from_slice(&self.move_buf[..moves.len()]);
+        moves.clone_from_slice(&self.move_buf[..len]);
     }
 }
