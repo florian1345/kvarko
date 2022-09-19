@@ -455,6 +455,7 @@ where
 
             let mut max = base_evaluator.evaluate_state(
                 state, alpha, beta, Some(move_count), Some(check));
+            alpha = alpha.max(max);
             let mut bound = ValueBound::Exact;
 
             for mov in moves {
