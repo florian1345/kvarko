@@ -120,6 +120,19 @@ const CAPTURE_VALUES: [u8; PIECE_COUNT] = [
     QUEEN_KING_CAPTURE_VALUE,
     QUEEN_KING_CAPTURE_VALUE
 ];
+const PROMOTION_VALUES: [u8; PIECE_COUNT] = [
+    0,
+    KNIGHT_BISHOP_CAPTURE_VALUE,
+    0, // Idea: usually, promoting to bishop or rook is unnecessary
+    0,
+    QUEEN_KING_CAPTURE_VALUE,
+    0
+];
+// If available usually better than ordinary pawn capture, as the pawn will
+// progress far into enemy territory.
+const EN_PASSANT_VALUE: u8 = MAX_PIECE_CAPTURE_VALUE + 2;
+// Better than nothing.
+const CASTLE_VALUE: u8 = MAX_PIECE_CAPTURE_VALUE;
 const MAX_PIECE_CAPTURE_VALUE: u8 = const_max(
     const_max(
         PAWN_CAPTURE_VALUE,
@@ -135,6 +148,10 @@ const NULL_MOVE: Move = Move::Ordinary {
 
 const fn piece_capture_value(piece: Piece) -> u8 {
     CAPTURE_VALUES[piece as usize]
+}
+
+const fn piece_promotion_value(piece: Piece) -> u8 {
+    PROMOTION_VALUES[piece as usize]
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -155,13 +172,13 @@ impl CaptureValue {
 
     #[inline]
     const fn promotion(promotion: Piece) -> CaptureValue {
-        CaptureValue(piece_capture_value(promotion))
+        CaptureValue(piece_promotion_value(promotion))
     }
 
     #[inline]
     const fn promotion_capture(promotion: Piece, captured: Piece) -> CaptureValue {
         CaptureValue(MAX_PIECE_CAPTURE_VALUE + 1 - PAWN_CAPTURE_VALUE +
-            piece_capture_value(promotion) + piece_capture_value(captured))
+            piece_promotion_value(promotion) + piece_capture_value(captured))
     }
 
     fn from_move(mov: &Move) -> CaptureValue {
@@ -174,7 +191,7 @@ impl CaptureValue {
                     CaptureValue::ordinary()
                 },
             Move::EnPassant { .. } =>
-                CaptureValue::capture(Piece::Pawn, Piece::Pawn),
+                CaptureValue(EN_PASSANT_VALUE),
             Move::Promotion { promotion, captured,.. } =>
                 if let Some(captured) = captured {
                     CaptureValue::promotion_capture(promotion, captured)
@@ -182,7 +199,7 @@ impl CaptureValue {
                 else {
                     CaptureValue::promotion(promotion)
                 },
-            Move::Castle { .. } => CaptureValue::ordinary()
+            Move::Castle { .. } => CaptureValue(CASTLE_VALUE)
         }
     }
 }
