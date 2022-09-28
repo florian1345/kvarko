@@ -454,6 +454,19 @@ impl Move {
     pub fn destination(&self, position: &Position) -> Option<Location> {
         (self.delta_mask() - position.board().of_player(position.turn())).min()
     }
+
+    pub fn to_coordinate_notation(&self, position: &Position) -> Option<String> {
+        let source = self.source(position)?;
+        let destionation = self.destination(position)?;
+        let bytes = [
+            b'a' + source.file() as u8,
+            b'1' + source.rank() as u8,
+            b'a' + destionation.file() as u8,
+            b'1' + destionation.rank() as u8
+        ];
+
+        Some(String::from_utf8(bytes.to_vec()).unwrap())
+    }
 }
 
 /// Calls `process` for every singleton in `targets`, which is given as the
