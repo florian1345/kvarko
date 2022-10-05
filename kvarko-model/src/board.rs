@@ -585,23 +585,13 @@ impl Board {
     }
 
     pub fn piece_at(&self, location: Location) -> Option<Piece> {
-        for piece in PIECES {
-            if self.pieces[piece as usize].contains(location) {
-                return Some(piece);
-            }
-        }
-
-        None
+        PIECES.into_iter()
+            .find(|&p| self.pieces[p as usize].contains(location))
     }
 
     pub fn player_at(&self, location: Location) -> Option<Player> {
-        for player in PLAYERS {
-            if self.players[player as usize].contains(location) {
-                return Some(player);
-            }
-        }
-
-        None
+        PLAYERS.into_iter()
+            .find(|&p| self.players[p as usize].contains(location))
     }
 
     pub(crate) fn piece_at_singleton(&self, singleton: Bitboard) -> Piece {
