@@ -724,7 +724,7 @@ where
             if let Some(value) = opening_book.get_value(state) {
                 let best_move = opening_book.get_best_move(state).unwrap();
 
-                return (value, Some(best_move));
+                return (value, Some(*best_move));
             }
         }
 
