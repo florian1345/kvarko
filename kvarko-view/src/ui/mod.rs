@@ -154,14 +154,14 @@ impl<D> Ui<D> {
     }
 
     pub fn element<E: 'static>(&self, element: UiElementId) -> &E {
-        (&self.elements[element.0])
+        self.elements[element.0]
             .as_any()
             .downcast_ref()
             .unwrap()
     }
 
     pub fn element_mut<E: 'static>(&mut self, element: UiElementId) -> &mut E {
-        (&mut self.elements[element.0])
+        self.elements[element.0]
             .as_any_mut()
             .downcast_mut()
             .unwrap()
