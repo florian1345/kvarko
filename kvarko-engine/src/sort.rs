@@ -66,7 +66,7 @@ where
 
     #[inline]
     fn fill_counters(&mut self, buf: &[T]) {
-        for &value in &*buf {
+        for &value in buf {
             self.counters.as_mut_slice()[value.as_usize()] += 1;
         }
 
@@ -83,7 +83,7 @@ where
         self.reset_counters();
         self.fill_counters(buf);
 
-        for &value in &*buf {
+        for &value in buf {
             let ctr_idx = value.as_usize();
 
             self.out[self.counters.as_slice()[ctr_idx] as usize] = value;
@@ -253,5 +253,11 @@ impl Presorter for CaptureValuePresorter {
         for (idx, &(_, mov)) in out.iter().rev().enumerate() {
             moves[idx] = mov;
         }
+    }
+}
+
+impl Default for CaptureValuePresorter {
+    fn default() -> CaptureValuePresorter {
+        CaptureValuePresorter::new()
     }
 }

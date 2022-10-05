@@ -423,6 +423,9 @@ where
     fn evaluate_state(&mut self, state: &mut State<H>, alpha: f32, beta: f32,
             _: Option<usize>, _: Option<bool>) -> f32 {
 
+        // TODO maybe this can be done as a method on &mut self?
+
+        #[allow(clippy::too_many_arguments)]
         fn evaluate_rec<H, E, L, S, R>(base_evaluator: &mut E,
             list_moves_in: &mut L, state: &mut State<H>,
             bufs: &mut [Vec<Move>], mut alpha: f32, mut beta: f32,
@@ -544,7 +547,7 @@ impl<E, S> TreeSearchEvaluator<E, S> {
             if depth <= self.search_depth + 1 - NO_TRANSPOSITION_SEARCH &&
                     entry.depth >= depth &&
                     process_ttable_entry(&mut alpha, &mut beta, entry) {
-                let mov = entry.recommended_move.clone();
+                let mov = entry.recommended_move;
                 return (entry.eval, Some(mov), entry.bound)
             }
         }
@@ -567,7 +570,7 @@ impl<E, S> TreeSearchEvaluator<E, S> {
                 }
             }
 
-            self.presorter.pre_sort(moves, &state.position());
+            self.presorter.pre_sort(moves, state.position());
 
             if let Some(entry) = entry {
                 let recommended_idx = moves.iter().enumerate()
@@ -615,7 +618,7 @@ impl<E, S> TreeSearchEvaluator<E, S> {
                 state.position_hash(), TreeSearchTableEntry {
                     depth,
                     eval: max,
-                    recommended_move: max_move.clone(),
+                    recommended_move: max_move,
                     bound
                 });
 
@@ -721,7 +724,7 @@ where
             if let Some(value) = opening_book.get_value(state) {
                 let best_move = opening_book.get_best_move(state).unwrap();
 
-                return (value, Some(best_move.clone()));
+                return (value, Some(best_move));
             }
         }
 
