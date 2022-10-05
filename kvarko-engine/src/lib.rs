@@ -10,6 +10,7 @@ use std::cmp::Ordering;
 use std::iter;
 
 use crate::book::OpeningBook;
+use crate::sort::{Presorter, CaptureValuePresorter};
 use crate::ttable::{
     AlwaysReplace,
     DepthAndBound,
@@ -23,6 +24,7 @@ use crate::ttable::{
 };
 
 pub mod book;
+pub mod sort;
 pub mod ttable;
 
 #[derive(PartialEq)]
@@ -376,7 +378,7 @@ where
 /// some [ListMovesIn] implementation. This searches the full tree, without any
 /// maximum depth. Alpha-beta-pruning is still applied.
 #[derive(Clone)]
-pub struct QuiescenseTreeSearchEvaluator<H, E, L>
+pub struct QuiescenseTreeSearchEvaluator<H, E, L, S>
 where
     H: PositionHasher,
     H::Hash: TTableHash
@@ -385,17 +387,18 @@ where
     list_moves_in: L,
     bufs: Vec<Vec<Move>>,
     transposition_table:
-        TranspositionTable<H, QuiescenceTableEntry, AlwaysReplace>
+        TranspositionTable<H, QuiescenceTableEntry, AlwaysReplace>,
+    presorter: S
 }
 
-impl<H, E, L> QuiescenseTreeSearchEvaluator<H, E, L>
+impl<H, E, L, S> QuiescenseTreeSearchEvaluator<H, E, L, S>
 where
     H: PositionHasher,
     H::Hash: TTableHash
 {
-
-    pub fn new(base_evaluator: E, list_moves_in: L, ttable_bits: u32)
-            -> QuiescenseTreeSearchEvaluator<H, E, L> {
+    pub fn new(base_evaluator: E, list_moves_in: L, presorter: S,
+            ttable_bits: u32)
+            -> QuiescenseTreeSearchEvaluator<H, E, L, S> {
         QuiescenseTreeSearchEvaluator {
             base_evaluator,
             list_moves_in,
@@ -403,32 +406,38 @@ where
                 .take(QUIESCENSE_BUFFER_COUNT)
                 .collect(),
             transposition_table:
-                TranspositionTable::new(ttable_bits, AlwaysReplace)
+                TranspositionTable::new(ttable_bits, AlwaysReplace),
+            presorter
         }
     }
 }
 
-impl<H, E, L> BaseEvaluator<H> for QuiescenseTreeSearchEvaluator<H, E, L>
+impl<H, E, L, S> BaseEvaluator<H> for QuiescenseTreeSearchEvaluator<H, E, L, S>
 where
     H: PositionHasher,
     H::Hash: TTableHash,
     E: BaseEvaluator<H>,
-    L: ListMovesIn
+    L: ListMovesIn,
+    S: Presorter
 {
     fn evaluate_state(&mut self, state: &mut State<H>, alpha: f32, beta: f32,
             _: Option<usize>, _: Option<bool>) -> f32 {
 
-        fn evaluate_rec<H, E, L, R>(base_evaluator: &mut E,
+        // TODO maybe this can be done as a method on &mut self?
+
+        #[allow(clippy::too_many_arguments)]
+        fn evaluate_rec<H, E, L, S, R>(base_evaluator: &mut E,
             list_moves_in: &mut L, state: &mut State<H>,
             bufs: &mut [Vec<Move>], mut alpha: f32, mut beta: f32,
-            ttable: &mut TranspositionTable<H, QuiescenceTableEntry, R>)
-            -> (f32, ValueBound)
+            ttable: &mut TranspositionTable<H, QuiescenceTableEntry, R>,
+            presorter: &mut S) -> (f32, ValueBound)
         where
             H: PositionHasher,
             H::Hash: TTableHash,
             E: BaseEvaluator<H>,
             L: ListMovesIn,
-            R: ReplacementPolicy<QuiescenceTableEntry>
+            R: ReplacementPolicy<QuiescenceTableEntry>,
+            S: Presorter
         {
             let entry = ttable.get_entry(state.position_hash());
     
@@ -443,19 +452,20 @@ where
             let (moves, bufs_rest) = bufs.split_first_mut().unwrap();
             moves.clear();
             let (check, move_count) = list_moves_in.list_moves_in(state.position(), moves);
-            moves.sort_by_cached_key(estimate_move);
+            presorter.pre_sort(moves, state.position());
 
             // Actor can stop trading now, if they want.
 
             let mut max = base_evaluator.evaluate_state(
                 state, alpha, beta, Some(move_count), Some(check));
+            alpha = alpha.max(max);
             let mut bound = ValueBound::Exact;
 
             for mov in moves {
                 let revert_info = state.make_move(mov);
                 let (value, rec_bound) = evaluate_rec(
                     base_evaluator, list_moves_in, state, bufs_rest,
-                    -beta, -alpha, ttable);
+                    -beta, -alpha, ttable, presorter);
                 let value = -value;
                 state.unmake_move(mov, revert_info);
 
@@ -483,7 +493,8 @@ where
             
         evaluate_rec(
             &mut self.base_evaluator, &mut self.list_moves_in, state,
-            &mut self.bufs, alpha, beta, &mut self.transposition_table).0
+            &mut self.bufs, alpha, beta, &mut self.transposition_table,
+            &mut self.presorter).0
     }
 }
 
@@ -492,51 +503,27 @@ const NO_TRANSPOSITION_SEARCH: u32 = 0;
 /// A [StateEvaluator] that does a negimax tree search on the input state,
 /// using alpha-beta-pruning.
 #[derive(Clone)]
-pub struct TreeSearchEvaluator<E> {
+pub struct TreeSearchEvaluator<E, S> {
     base_evaluator: E,
+    presorter: S,
     search_depth: u32,
     ttable_bits: u32
 }
 
-impl<E> TreeSearchEvaluator<E> {
+impl<E, S> TreeSearchEvaluator<E, S> {
 
-    pub fn new(base_evaluator: E, search_depth: u32, ttable_bits: u32)
-            -> TreeSearchEvaluator<E> {
+    pub fn new(base_evaluator: E, presorter: S, search_depth: u32,
+            ttable_bits: u32) -> TreeSearchEvaluator<E, S> {
         TreeSearchEvaluator {
             base_evaluator,
+            presorter,
             search_depth,
             ttable_bits
         }
     }
 }
 
-fn estimate_move(mov: &Move) -> OrdF32 {
-    match mov {
-        &Move::Ordinary { moved, captured, .. } => {
-            if let Some(captured) = captured {
-                let cap_value = DEFAULT_MATERIAL_VALUES[captured as usize];
-                let piece_value = DEFAULT_MATERIAL_VALUES[moved as usize];
-                OrdF32(-cap_value / piece_value)
-            }
-            else {
-                OrdF32(0.0)
-            }
-        },
-        Move::EnPassant { .. } => OrdF32(-1.0),
-        &Move::Promotion { promotion, captured, .. } => {
-            let mut value = DEFAULT_MATERIAL_VALUES[promotion as usize];
-
-            if let Some(captured) = captured {
-                value += DEFAULT_MATERIAL_VALUES[captured as usize];
-            }
-
-            OrdF32(-value)
-        },
-        Move::Castle { .. } => OrdF32(0.0)
-    }
-}
-
-impl<E> TreeSearchEvaluator<E> {
+impl<E, S> TreeSearchEvaluator<E, S> {
     fn evaluate_rec<H, R>(&mut self, state: &mut State<H>, bufs: &mut [Vec<Move>],
         mut alpha: f32, mut beta: f32,
         ttable: &mut TranspositionTable<H, TreeSearchTableEntry, R>)
@@ -545,7 +532,8 @@ impl<E> TreeSearchEvaluator<E> {
         H: PositionHasher,
         H::Hash: TTableHash,
         E: BaseEvaluator<H>,
-        R: ReplacementPolicy<TreeSearchTableEntry>
+        R: ReplacementPolicy<TreeSearchTableEntry>,
+        S: Presorter
     {
         let depth = bufs.len() as u32;
 
@@ -559,7 +547,7 @@ impl<E> TreeSearchEvaluator<E> {
             if depth <= self.search_depth + 1 - NO_TRANSPOSITION_SEARCH &&
                     entry.depth >= depth &&
                     process_ttable_entry(&mut alpha, &mut beta, entry) {
-                let mov = entry.recommended_move.clone();
+                let mov = entry.recommended_move;
                 return (entry.eval, Some(mov), entry.bound)
             }
         }
@@ -582,16 +570,13 @@ impl<E> TreeSearchEvaluator<E> {
                 }
             }
 
+            self.presorter.pre_sort(moves, state.position());
+
             if let Some(entry) = entry {
-                moves.sort_by_cached_key(|m| if m == &entry.recommended_move {
-                    OrdF32(f32::NEG_INFINITY)
-                }
-                else {
-                    estimate_move(m)
-                });
-            }
-            else {
-                moves.sort_by_cached_key(estimate_move);
+                let recommended_idx = moves.iter().enumerate()
+                    .find(|(_, m)| *m == &entry.recommended_move)
+                    .unwrap().0;
+                moves.swap(0, recommended_idx);
             }
 
             let mut max = f32::NEG_INFINITY;
@@ -633,7 +618,7 @@ impl<E> TreeSearchEvaluator<E> {
                 state.position_hash(), TreeSearchTableEntry {
                     depth,
                     eval: max,
-                    recommended_move: max_move.clone(),
+                    recommended_move: max_move,
                     bound
                 });
 
@@ -642,11 +627,12 @@ impl<E> TreeSearchEvaluator<E> {
     }
 }
 
-impl<H, E> StateEvaluator<H> for TreeSearchEvaluator<E>
+impl<H, E, S> StateEvaluator<H> for TreeSearchEvaluator<E, S>
 where
     H: PositionHasher,
     H::Hash: TTableHash,
-    E: BaseEvaluator<H>
+    E: BaseEvaluator<H>,
+    S: Presorter
 {
     fn evaluate_state(&mut self, state: &mut State<H>) -> (f32, Option<Move>) {
         let mut bufs = iter::repeat_with(Vec::new)
@@ -702,8 +688,14 @@ where
     }
 }
 
-type KvarkoEvaluator<H> = TreeSearchEvaluator<QuiescenseTreeSearchEvaluator<
-    H, KvarkoBaseEvaluator, ListNonPawnCapturesIn>>;
+type KvarkoEvaluator<H> = TreeSearchEvaluator<
+    QuiescenseTreeSearchEvaluator<
+        H,
+        KvarkoBaseEvaluator,
+        ListNonPawnCapturesIn,
+        CaptureValuePresorter
+    >,
+    CaptureValuePresorter>;
 
 /// A [StateEvaluator] that represents the totality of functionality contained
 /// in the Kvarko engine. In particular, this uses a [TreeSearchEvaluator]
@@ -732,7 +724,7 @@ where
             if let Some(value) = opening_book.get_value(state) {
                 let best_move = opening_book.get_best_move(state).unwrap();
 
-                return (value, Some(best_move.clone()));
+                return (value, Some(best_move));
             }
         }
 
@@ -766,8 +758,10 @@ where
             base_evaluator: QuiescenseTreeSearchEvaluator::new(
                 KvarkoBaseEvaluator::default(),
                 ListNonPawnCapturesIn,
+                CaptureValuePresorter::new(),
                 18
             ),
+            presorter: CaptureValuePresorter::new(),
             search_depth: depth,
             ttable_bits: 20
         }
