@@ -545,21 +545,31 @@ impl Position {
         }
     }
 
+    #[inline]
+    fn notify_restored_castling_rights<H>(&mut self, revert_info: &PositionRevertInfo, hasher: &mut H, player: Player)
+    where
+        H: PositionHasher
+    {
+        let idx = player as usize;
+
+        if !self.short_castles[idx] && revert_info.short_castles[idx] {
+            hasher.on_castling_right_gained(player, false);
+        }
+
+        if !self.long_castles[idx] && revert_info.long_castles[idx] {
+            hasher.on_castling_right_gained(player, true);
+        }
+    }
+
     pub fn unmake_move_with_hasher<H>(&mut self, mov: &Move, revert_info: PositionRevertInfo, hasher: &mut H)
     where
         H: PositionHasher
     {
         let turn = self.turn.opponent();
-        let turn_idx = turn as usize;
+        let opponent = self.turn;
 
-        if !self.short_castles[turn_idx] &&
-                revert_info.short_castles[turn_idx] {
-            hasher.on_castling_right_gained(turn, false);
-        }
-
-        if !self.long_castles[turn_idx] && revert_info.long_castles[turn_idx] {
-            hasher.on_castling_right_gained(turn, true);
-        }
+        self.notify_restored_castling_rights(&revert_info, hasher, turn);
+        self.notify_restored_castling_rights(&revert_info, hasher, opponent);
 
         if let Some(en_passant_file) = self.en_passant_file() {
             hasher.on_en_passant_disabled(en_passant_file);
@@ -587,7 +597,7 @@ impl Position {
                 hasher.on_piece_entered(Piece::Pawn, turn, dest);
 
                 if let Some(captured) = captured {
-                    hasher.on_piece_entered(captured, turn.opponent(), src);
+                    hasher.on_piece_entered(captured, opponent, src);
                 }
             },
             Move::EnPassant { delta_mask, target } => {
@@ -596,8 +606,7 @@ impl Position {
 
                 hasher.on_piece_left(Piece::Pawn, turn, src);
                 hasher.on_piece_entered(Piece::Pawn, turn, dest);
-                hasher.on_piece_entered(
-                    Piece::Pawn, turn.opponent(), target);
+                hasher.on_piece_entered(Piece::Pawn, opponent, target);
             }
         }
 
