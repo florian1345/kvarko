@@ -752,6 +752,35 @@ where
     H: PositionHasher,
     H::Hash: TTableHash
 {
+    kvarko_engine_with_ttable_bits(depth, opening_book, 20, 18)
+}
+
+/// Constructs a [KvarkoEngine] with given transposition table sizes.
+///
+/// # Arguments
+///
+/// * `depth`: The maximum search depth to which to search the game tree. Depth
+/// is counted in half-moves (ply), i.e. a depth of 2 would search all
+/// possibilities for 2 ply.
+/// * `opening_book`: Optionally, specifies an [OpeningBook] for the engine to
+/// use.
+/// * `tree_search_ttable_bits`: The number of significant bits used for
+/// indexing entries in the transposition table used by ordinary tree search.
+/// * `quiescence_search_ttable_bits`: The number of significant bits used for
+/// indexing entries in the transposition table used by quiescence search.
+///
+/// # Returns
+///
+/// A [StateEvaluatingController] wrapped around a [KvarkoEngine] with the
+/// given parameters.
+pub fn kvarko_engine_with_ttable_bits<H>(depth: u32,
+    opening_book: Option<OpeningBook>, tree_search_ttable_bits: u32,
+    quiescence_search_ttable_bits: u32)
+    -> StateEvaluatingController<KvarkoEngine<H>>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash
+{
     StateEvaluatingController(KvarkoEngine {
         opening_book,
         evaluator: TreeSearchEvaluator {
@@ -759,11 +788,11 @@ where
                 KvarkoBaseEvaluator::default(),
                 ListNonPawnCapturesIn,
                 CaptureValuePresorter::new(),
-                18
+                quiescence_search_ttable_bits
             ),
             presorter: CaptureValuePresorter::new(),
             search_depth: depth,
-            ttable_bits: 20
+            ttable_bits: tree_search_ttable_bits
         }
     })
 }
