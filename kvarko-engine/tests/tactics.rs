@@ -125,3 +125,108 @@ fn fork() {
 
     assert_finds_move(fen, 4, best_move);
 }
+
+#[test]
+fn capture_defended_piece_with_subsequent_fork() {
+    // Board (black to move):
+    // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+    // │   │   │   │   │   │ r │   │   │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │   │   │   │   │   │   │   │ k │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │   │ b │   │   │   │   │   │ p │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │   │   │   │   │   │ p │ p │   │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │   │   │   │   │   │   │   │   │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │   │   │   │   │ N │ P │   │ P │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │   │ B │   │ n │   │   │ P │ K │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │   │   │   │   │ R │   │   │   │
+    // └───┴───┴───┴───┴───┴───┴───┴───┘
+    //
+    // Black can capture the knight on e3 with the bishop. If white atempts to
+    // recapture with the rook, black has a fork with the knight on f1. So,
+    // this move wins material.
+
+    let fen = "5r2/7k/1b5p/5pp1/8/4NP1P/1B1n2PK/4R3 b - - 0 1";
+    let best_move = Move::Ordinary {
+        moved: Piece::Bishop,
+        captured: Some(Piece::Knight),
+        delta_mask: Bitboard(0x0000020000100000)
+    };
+
+    assert_finds_move(fen, 6, best_move);
+}
+
+#[test]
+fn forced_capture() {
+    // Board (white to move):
+    // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+    // │ k │ b │   │   │   │   │   │   │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │ p │   │   │   │   │   │   │   │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │   │ p │   │   │   │   │   │   │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │   │   │   │   │   │   │   │   │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │   │   │   │   │   │   │ Q │   │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │   │   │ P │ B │   │   │   │   │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │ P │ P │   │   │   │   │   │   │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │   │ K │   │   │ R │   │   │   │
+    // └───┴───┴───┴───┴───┴───┴───┴───┘
+    //
+    // White can give check by moving the bishop to e4. Black's only move will
+    // be to capture the bishop with the queen, allowing white to capture the
+    // queen with the rook.
+
+    let fen = "kb6/p7/1p6/8/6q1/2PB4/PP6/1K2R3 w - - 0 1";
+    let best_move = Move::Ordinary {
+        moved: Piece::Bishop,
+        captured: None,
+        delta_mask: Bitboard(0x0000000010080000)
+    };
+
+    assert_finds_move(fen, 4, best_move);
+}
+
+#[test]
+fn skewer() {
+    // Board (white to move):
+    // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+    // │   │   │   │   │ k │   │   │ r │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │ p │ p │ n │   │   │ p │ p │ p │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │   │ q │ p │   │   │ n │ b │   │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │   │   │ b │   │   │   │   │   │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │   │   │ P │   │   │   │ Q │   │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │   │ P │   │   │   │ N │ B │ P │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │ P │   │   │   │   │ P │ P │   │
+    // ├───┼───┼───┼───┼───┼───┼───┼───┤
+    // │   │   │   │ R │   │ B │ K │   │
+    // └───┴───┴───┴───┴───┴───┴───┴───┘
+    //
+    // White can move the queen to c8, skewering the king and rook, leading to
+    // won material.
+
+    let fen =
+        "4k2r/ppn2ppp/1qp2nb1/2b5/2P3Q1/1P3NBP/P4PP1/3R1BK1 w - - 0 1";
+    let best_move = Move::Ordinary {
+        moved: Piece::Queen,
+        captured: None,
+        delta_mask: Bitboard(0x0400000040000000)
+    };
+
+    assert_finds_move(fen, 4, best_move);
+}
