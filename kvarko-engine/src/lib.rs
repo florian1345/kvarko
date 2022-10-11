@@ -545,7 +545,7 @@ impl<E, S> TreeSearchEvaluator<E, S> {
 
         if let Some(entry) = entry {
             if depth <= self.search_depth + 1 - NO_TRANSPOSITION_SEARCH &&
-                    entry.depth >= depth &&
+                    entry.depth == depth &&
                     process_ttable_entry(&mut alpha, &mut beta, entry) {
                 let mov = entry.recommended_move;
                 return (entry.eval, Some(mov), entry.bound)
