@@ -235,11 +235,11 @@ impl<H: PositionHasher> BaseEvaluator<H> for KvarkoBaseEvaluator {
         let opponent_pawns = board.of_player_and_kind(opponent, Piece::Pawn);
 
         for file in FILES {
-            let own_pawns = (own_pawns & file).len();
-            value -= self.doubled_pawn_penalty * (own_pawns as f32 - 1.0);
+            let own_pawns = (own_pawns & file).len().saturating_sub(1);
+            value -= self.doubled_pawn_penalty * own_pawns as f32;
 
-            let opponent_pawns = (opponent_pawns & file).len();
-            value += self.doubled_pawn_penalty * (opponent_pawns as f32 - 1.0);
+            let opponent_pawns = (opponent_pawns & file).len().saturating_sub(1);
+            value += self.doubled_pawn_penalty * opponent_pawns as f32;
         }
 
         value += self.evaluate_pawn_ranks(turn, own_pawns);
@@ -412,6 +412,70 @@ where
     }
 }
 
+impl<H, E, L, S> QuiescenseTreeSearchEvaluator<H, E, L, S>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash,
+    E: BaseEvaluator<H>,
+    L: ListMovesIn,
+    S: Presorter
+{
+    fn evaluate_rec(&mut self, state: &mut State<H>, mut alpha: f32,
+            mut beta: f32) -> (f32, ValueBound) {
+        let entry = self.transposition_table.get_entry(state.position_hash());
+
+        if let Some(entry) = entry {
+            if process_ttable_entry(&mut alpha, &mut beta, entry) {
+                return (entry.eval, entry.bound);
+            }
+        }
+
+        // TODO reduce code duplication
+
+        let mut moves = self.bufs.pop().unwrap();
+        moves.clear();
+        let (check, move_count) =
+            self.list_moves_in.list_moves_in(state.position(), &mut moves);
+        self.presorter.pre_sort(&mut moves, state.position());
+
+        // Actor can stop trading now, if they want.
+
+        let mut max = self.base_evaluator.evaluate_state(
+            state, alpha, beta, Some(move_count), Some(check));
+        alpha = alpha.max(max);
+        let mut bound = ValueBound::Exact;
+
+        for mov in &moves {
+            let revert_info = state.make_move(mov);
+            let (value, rec_bound) =
+                self.evaluate_rec(state, -beta, -alpha);
+            let value = -value;
+            state.unmake_move(mov, revert_info);
+
+            if value > max {
+                max = value;
+                bound = rec_bound.invert();
+            }
+
+            alpha = alpha.max(max);
+
+            if alpha >= beta {
+                bound = ValueBound::Lower;
+                break;
+            }
+        }
+
+        self.transposition_table.enter(
+            state.position_hash(), QuiescenceTableEntry {
+                eval: max,
+                bound
+            });
+        self.bufs.push(moves);
+
+        (max, bound)
+    }
+}
+
 impl<H, E, L, S> BaseEvaluator<H> for QuiescenseTreeSearchEvaluator<H, E, L, S>
 where
     H: PositionHasher,
@@ -422,79 +486,7 @@ where
 {
     fn evaluate_state(&mut self, state: &mut State<H>, alpha: f32, beta: f32,
             _: Option<usize>, _: Option<bool>) -> f32 {
-
-        // TODO maybe this can be done as a method on &mut self?
-
-        #[allow(clippy::too_many_arguments)]
-        fn evaluate_rec<H, E, L, S, R>(base_evaluator: &mut E,
-            list_moves_in: &mut L, state: &mut State<H>,
-            bufs: &mut [Vec<Move>], mut alpha: f32, mut beta: f32,
-            ttable: &mut TranspositionTable<H, QuiescenceTableEntry, R>,
-            presorter: &mut S) -> (f32, ValueBound)
-        where
-            H: PositionHasher,
-            H::Hash: TTableHash,
-            E: BaseEvaluator<H>,
-            L: ListMovesIn,
-            R: ReplacementPolicy<QuiescenceTableEntry>,
-            S: Presorter
-        {
-            let entry = ttable.get_entry(state.position_hash());
-    
-            if let Some(entry) = entry {
-                if process_ttable_entry(&mut alpha, &mut beta, entry) {
-                    return (entry.eval, entry.bound);
-                }
-            }
-
-            // TODO reduce code duplication
-
-            let (moves, bufs_rest) = bufs.split_first_mut().unwrap();
-            moves.clear();
-            let (check, move_count) = list_moves_in.list_moves_in(state.position(), moves);
-            presorter.pre_sort(moves, state.position());
-
-            // Actor can stop trading now, if they want.
-
-            let mut max = base_evaluator.evaluate_state(
-                state, alpha, beta, Some(move_count), Some(check));
-            alpha = alpha.max(max);
-            let mut bound = ValueBound::Exact;
-
-            for mov in moves {
-                let revert_info = state.make_move(mov);
-                let (value, rec_bound) = evaluate_rec(
-                    base_evaluator, list_moves_in, state, bufs_rest,
-                    -beta, -alpha, ttable, presorter);
-                let value = -value;
-                state.unmake_move(mov, revert_info);
-
-                if value > max {
-                    max = value;
-                    bound = rec_bound.invert();
-                }
-
-                alpha = alpha.max(max);
-
-                if alpha >= beta {
-                    bound = ValueBound::Lower;
-                    break;
-                }
-            }
-
-            ttable.enter(
-                state.position_hash(), QuiescenceTableEntry {
-                    eval: max,
-                    bound
-                });
-
-            (max, bound)
-        }
-            
-        evaluate_rec(
-            &mut self.base_evaluator, &mut self.list_moves_in, state,
-            &mut self.bufs, alpha, beta, &mut self.transposition_table,
-            &mut self.presorter).0
+        self.evaluate_rec(state, alpha, beta).0
     }
 }
 
@@ -795,4 +787,32 @@ where
             ttable_bits: tree_search_ttable_bits
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+
+    use kvarko_model::hash::ZobristHasher;
+
+    use super::*;
+
+    #[test]
+    fn base_evaluator_punishes_doubled_pawns() {
+        // In both scenarios, players have equal number of available moves.
+
+        let no_doubled_pawns_fen = "8/4k3/4p3/3pP3/3P4/3K4/8/8 w - - 0 1";
+        let mut no_doubled_pawns: State<ZobristHasher<u64>> =
+            State::from_fen(no_doubled_pawns_fen).unwrap();
+        let doubled_pawns_fen = "8/8/3Ppk2/3p4/3P4/3K4/8/8 w - - 0 1";
+        let mut doubled_pawns: State<ZobristHasher<u64>> =
+            State::from_fen(doubled_pawns_fen).unwrap();
+        let mut base_evaluator = KvarkoBaseEvaluator::default();
+
+        let no_doubled_pawns_eval = base_evaluator.evaluate_state(
+            &mut no_doubled_pawns, f32::NEG_INFINITY, f32::INFINITY, None, None);
+        let doubled_pawns_eval = base_evaluator.evaluate_state(
+            &mut doubled_pawns, f32::NEG_INFINITY, f32::INFINITY, None, None);
+
+        assert!(no_doubled_pawns_eval > doubled_pawns_eval + 0.01);
+    }
 }

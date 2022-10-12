@@ -22,9 +22,7 @@ fn perft(fen: &str, depth: usize) -> Result<usize, FenError> {
         }
     
         if depth == 1 {
-            moves.clear();
-            movement::list_moves_in(state.position(), moves);
-            return moves.len();
+            return movement::count_moves(state.position()).0;
         }
     
         let mut sum = 0;
