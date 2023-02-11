@@ -16,9 +16,9 @@ fn main() -> GameResult {
 
     graphics::set_default_filter(&mut ctx, FilterMode::Linear);
     graphics::set_mode(&mut ctx,
-        WindowMode::default().dimensions(1280.0, 720.0))?;
+        WindowMode::default().dimensions(720.0, 720.0))?;
     graphics::set_screen_coordinates(&mut ctx,
-        Rect::new(0.0, 0.0, 1280.0, 720.0))?;
+        Rect::new(0.0, 0.0, 720.0, 720.0))?;
 
     let menu_state = MenuState::new(&ctx);
     let manager = GameStateManager::new(menu_state);

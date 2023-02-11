@@ -24,6 +24,7 @@ use crate::ttable::{
 };
 
 pub mod book;
+pub mod ordering;
 pub mod sort;
 pub mod ttable;
 
@@ -340,7 +341,8 @@ impl ListMovesIn for ListNonPawnCapturesIn {
     }
 }
 
-const QUIESCENSE_BUFFER_COUNT: usize = 15;
+// More than 14 to account for possible promotions.
+const QUIESCENSE_BUFFER_COUNT: usize = 30;
 
 /// Applies the information stored in `entry` to the given alpha and beta
 /// bounds. If an early return is possible, `true` is returned.
@@ -651,7 +653,6 @@ where
     H: PositionHasher,
     E: StateEvaluator<H>
 {
-
     fn evaluate_state(&mut self, state: &mut State<H>)
             -> (f32, Option<Move>) {
         self.0.evaluate_state(state)
