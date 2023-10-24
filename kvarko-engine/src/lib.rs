@@ -187,6 +187,15 @@ impl Default for KvarkoBaseEvaluator {
     }
 }
 
+#[inline]
+fn evaluate_if_no_moves_remain(check: bool) -> f32 {
+    if check {
+        -CHECKMATE_VALUE
+    } else {
+        0.0
+    }
+}
+
 impl<H: PositionHasher> BaseEvaluator<H> for KvarkoBaseEvaluator {
 
     fn evaluate_state(&mut self, state: &mut State<H>, _: f32, _: f32,
@@ -205,12 +214,7 @@ impl<H: PositionHasher> BaseEvaluator<H> for KvarkoBaseEvaluator {
             };
 
         if moves == 0 {
-            if check {
-                return -CHECKMATE_VALUE;
-            }
-            else {
-                return 0.0;
-            }
+            return evaluate_if_no_moves_remain(check)
         }
 
         let opponent = turn.opponent();
@@ -267,43 +271,6 @@ impl ListMovesIn for ListAllMovesIn {
 }
 
 #[derive(Clone)]
-pub struct ListCapturesIn;
-
-impl ListMovesIn for ListCapturesIn {
-    fn list_moves_in(&self, position: &Position, moves: &mut Vec<Move>)
-            -> (bool, usize) {
-        struct CapturesLister<'a> {
-            moves: &'a mut Vec<Move>,
-            count: usize
-        }
-
-        impl<'a> MoveProcessor for CapturesLister<'a> {
-            fn process(&mut self, mov: Move) {
-                self.count += 1;
-                let capture = match &mov {
-                    Move::Ordinary { captured, .. } => captured.is_some(),
-                    Move::EnPassant { .. } => true,
-                    Move::Promotion { captured, .. } => captured.is_some(),
-                    Move::Castle { .. } => false
-                };
-
-                if capture {
-                    self.moves.push(mov);
-                }
-            }
-        }
-
-        let mut processor = CapturesLister {
-            moves,
-            count: 0
-        };
-        let check = movement::process_moves(position, &mut processor);
-
-        (check, processor.count)
-    }
-}
-
-#[derive(Clone)]
 pub struct ListNonPawnCapturesIn;
 
 impl ListMovesIn for ListNonPawnCapturesIn {
@@ -317,16 +284,15 @@ impl ListMovesIn for ListNonPawnCapturesIn {
         impl<'a> MoveProcessor for NonPawnCapturesLister<'a> {
             fn process(&mut self, mov: Move) {
                 self.count += 1;
-                let captured = match &mov {
-                    Move::Ordinary { captured, .. } => *captured,
-                    Move::Promotion { captured, .. } => *captured,
-                    _ => None
-                };
 
-                if let Some(captured) = captured {
-                    if captured != Piece::Pawn {
-                        self.moves.push(mov);
-                    }
+                match &mov {
+                    Move::Ordinary { captured, .. }
+                            | Move::Promotion { captured, .. } => {
+                        if captured.iter().any(|&captured| captured != Piece::Pawn) {
+                            self.moves.push(mov);
+                        }
+                    },
+                    _ => { }
                 }
             }
         }
@@ -346,7 +312,7 @@ const QUIESCENSE_BUFFER_COUNT: usize = 30;
 
 /// Applies the information stored in `entry` to the given alpha and beta
 /// bounds. If an early return is possible, `true` is returned.
-fn process_ttable_entry<E>(alpha: &mut f32, beta: &mut f32,
+fn should_use_ttable_entry<E>(alpha: &mut f32, beta: &mut f32,
     entry: &E) -> bool
 where
     E: TTableEntry
@@ -427,7 +393,7 @@ where
         let entry = self.transposition_table.get_entry(state.position_hash());
 
         if let Some(entry) = entry {
-            if process_ttable_entry(&mut alpha, &mut beta, entry) {
+            if should_use_ttable_entry(&mut alpha, &mut beta, entry) {
                 return (entry.eval, entry.bound);
             }
         }
@@ -535,33 +501,28 @@ impl<E, S> TreeSearchEvaluator<E, S> {
             return (self.base_evaluator.evaluate_state(state, alpha, beta, None, None), None, ValueBound::Exact);
         }
 
-        let entry = ttable.get_entry(state.position_hash());
-
-        if let Some(entry) = entry {
-            if depth <= self.search_depth + 1 - NO_TRANSPOSITION_SEARCH &&
-                    entry.depth == depth &&
-                    process_ttable_entry(&mut alpha, &mut beta, entry) {
-                let mov = entry.recommended_move;
-                return (entry.eval, Some(mov), entry.bound)
-            }
-        }
-
         if state.is_stateful_draw() {
             // Checkmate is covered later
             (0.0, None, ValueBound::Exact)
         }
         else {
+            let entry = ttable.get_entry(state.position_hash());
+
+            if let Some(entry) = entry {
+                if depth <= self.search_depth + 1 - NO_TRANSPOSITION_SEARCH &&
+                        entry.depth == depth &&
+                        should_use_ttable_entry(&mut alpha, &mut beta, entry) {
+                    let mov = entry.recommended_move;
+                    return (entry.eval, Some(mov), entry.bound)
+                }
+            }
+
             let (moves, bufs_rest) = bufs.split_first_mut().unwrap();
             moves.clear();
             let check = movement::list_moves_in(state.position(), moves);
 
             if moves.is_empty() {
-                if check {
-                    return (-CHECKMATE_VALUE, None, ValueBound::Exact);
-                }
-                else {
-                    return (0.0, None, ValueBound::Exact);
-                }
+                return (evaluate_if_no_moves_remain(check), None, ValueBound::Exact);
             }
 
             self.presorter.pre_sort(moves, state.position());
