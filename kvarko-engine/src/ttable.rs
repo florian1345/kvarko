@@ -221,3 +221,17 @@ where
         *entry = Some((hash, new_entry));
     }
 }
+
+impl<H, E, R> TranspositionTable<H, E, R>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash,
+    R: ReplacementPolicy<E>,
+    E: Clone
+{
+
+    /// Removes all entries from the transposition table.
+    pub fn clear(&mut self) {
+        self.entries.as_mut().fill(None);
+    }
+}

@@ -1,21 +1,20 @@
+use std::cmp::Ordering;
+use std::iter;
+
 use kvarko_model::board::Bitboard;
 use kvarko_model::game::Controller;
 use kvarko_model::hash::PositionHasher;
 use kvarko_model::movement::{self, Move, MoveProcessor};
-use kvarko_model::state::{State, Position};
 use kvarko_model::piece::Piece;
 use kvarko_model::player::Player;
-
-use std::cmp::Ordering;
-use std::iter;
+use kvarko_model::state::{Position, State};
 
 use crate::book::OpeningBook;
-use crate::sort::{Presorter, CaptureValuePresorter};
+use crate::sort::{CaptureValuePresorter, Presorter};
 use crate::ttable::{
     AlwaysReplace,
     DepthAndBound,
     QuiescenceTableEntry,
-    ReplacementPolicy,
     TranspositionTable,
     TreeSearchTableEntry,
     TTableEntry,
@@ -463,38 +462,42 @@ const NO_TRANSPOSITION_SEARCH: u32 = 0;
 /// A [StateEvaluator] that does a negimax tree search on the input state,
 /// using alpha-beta-pruning.
 #[derive(Clone)]
-pub struct TreeSearchEvaluator<E, S> {
+pub struct TreeSearchEvaluator<H, E, S>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash
+{
     base_evaluator: E,
     presorter: S,
     search_depth: u32,
-    ttable_bits: u32
+    ttable: TranspositionTable<H, TreeSearchTableEntry, DepthAndBound>
 }
 
-impl<E, S> TreeSearchEvaluator<E, S> {
-
+impl<H, E, S> TreeSearchEvaluator<H, E, S>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash
+{
     pub fn new(base_evaluator: E, presorter: S, search_depth: u32,
-            ttable_bits: u32) -> TreeSearchEvaluator<E, S> {
+            ttable_bits: u32) -> TreeSearchEvaluator<H, E, S> {
         TreeSearchEvaluator {
             base_evaluator,
             presorter,
             search_depth,
-            ttable_bits
+            ttable: TranspositionTable::new(ttable_bits, DepthAndBound)
         }
     }
 }
 
-impl<E, S> TreeSearchEvaluator<E, S> {
-    fn evaluate_rec<H, R>(&mut self, state: &mut State<H>, bufs: &mut [Vec<Move>],
-        mut alpha: f32, mut beta: f32,
-        ttable: &mut TranspositionTable<H, TreeSearchTableEntry, R>)
-        -> (f32, Option<Move>, ValueBound)
-    where
-        H: PositionHasher,
-        H::Hash: TTableHash,
-        E: BaseEvaluator<H>,
-        R: ReplacementPolicy<TreeSearchTableEntry>,
-        S: Presorter
-    {
+impl<H, E, S> TreeSearchEvaluator<H, E, S>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash,
+    E: BaseEvaluator<H>,
+    S: Presorter
+{
+    fn evaluate_rec(&mut self, state: &mut State<H>, bufs: &mut [Vec<Move>],
+            mut alpha: f32, mut beta: f32) -> (f32, Option<Move>, ValueBound) {
         let depth = bufs.len() as u32;
 
         if depth == 1 {
@@ -506,7 +509,7 @@ impl<E, S> TreeSearchEvaluator<E, S> {
             (0.0, None, ValueBound::Exact)
         }
         else {
-            let entry = ttable.get_entry(state.position_hash());
+            let entry = self.ttable.get_entry(state.position_hash());
 
             if let Some(entry) = entry {
                 if depth <= self.search_depth + 1 - NO_TRANSPOSITION_SEARCH &&
@@ -541,7 +544,7 @@ impl<E, S> TreeSearchEvaluator<E, S> {
             for mov in moves {
                 let revert_info = state.make_move(mov);
                 let (rec_value, _, rec_bound) =
-                    self.evaluate_rec(state, bufs_rest, -beta, -alpha, ttable);
+                    self.evaluate_rec(state, bufs_rest, -beta, -alpha);
                 let mut value = -rec_value;
                 state.unmake_move(mov, revert_info);
 
@@ -569,7 +572,7 @@ impl<E, S> TreeSearchEvaluator<E, S> {
             }
 
             let max_move = max_move.cloned().unwrap();
-            ttable.enter(
+            self.ttable.enter(
                 state.position_hash(), TreeSearchTableEntry {
                     depth,
                     eval: max,
@@ -582,7 +585,7 @@ impl<E, S> TreeSearchEvaluator<E, S> {
     }
 }
 
-impl<H, E, S> StateEvaluator<H> for TreeSearchEvaluator<E, S>
+impl<H, E, S> StateEvaluator<H> for TreeSearchEvaluator<H, E, S>
 where
     H: PositionHasher,
     H::Hash: TTableHash,
@@ -593,10 +596,9 @@ where
         let mut bufs = iter::repeat_with(Vec::new)
             .take(self.search_depth as usize + 1)
             .collect::<Vec<_>>();
-        let mut ttable =
-            TranspositionTable::new(self.ttable_bits, DepthAndBound);
+        self.ttable.clear();
         let (value, mov, _) = self.evaluate_rec(
-            state, &mut bufs, f32::NEG_INFINITY, f32::INFINITY, &mut ttable);
+            state, &mut bufs, f32::NEG_INFINITY, f32::INFINITY);
 
         (value, mov)
     }
@@ -643,6 +645,7 @@ where
 }
 
 type KvarkoEvaluator<H> = TreeSearchEvaluator<
+    H,
     QuiescenseTreeSearchEvaluator<
         H,
         KvarkoBaseEvaluator,
@@ -737,23 +740,22 @@ where
 {
     StateEvaluatingController(KvarkoEngine {
         opening_book,
-        evaluator: TreeSearchEvaluator {
-            base_evaluator: QuiescenseTreeSearchEvaluator::new(
+        evaluator: TreeSearchEvaluator::new(
+            QuiescenseTreeSearchEvaluator::new(
                 KvarkoBaseEvaluator::default(),
                 ListNonPawnCapturesIn,
                 CaptureValuePresorter::new(),
                 quiescence_search_ttable_bits
             ),
-            presorter: CaptureValuePresorter::new(),
-            search_depth: depth,
-            ttable_bits: tree_search_ttable_bits
-        }
+            CaptureValuePresorter::new(),
+            depth,
+            tree_search_ttable_bits
+        )
     })
 }
 
 #[cfg(test)]
 mod tests {
-
     use kvarko_model::hash::ZobristHasher;
 
     use super::*;
