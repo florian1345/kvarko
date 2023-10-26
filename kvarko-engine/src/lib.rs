@@ -364,6 +364,16 @@ where
     }
 }
 
+#[inline]
+fn apply_penalty_for_extra_move_if_checkmate(value: &mut f32) {
+    if *value > CHECKMATE_DELTA {
+        *value -= CHECKMATE_DELTA;
+    }
+    else if *value < -CHECKMATE_DELTA {
+        *value += CHECKMATE_DELTA;
+    }
+}
+
 /// A [BaseEvaluator] which does quiescense search on all moves provided by
 /// some [ListMovesIn] implementation. This searches the full tree, without any
 /// maximum depth. Alpha-beta-pruning is still applied.
@@ -445,9 +455,8 @@ where
             if value > max {
                 max = value;
                 bound = rec_bound.invert();
+                alpha = alpha.max(max);
             }
-
-            alpha = alpha.max(max);
 
             if alpha >= beta {
                 bound = ValueBound::Lower;
@@ -579,22 +588,14 @@ where
                 let mut value = -rec_value;
                 state.unmake_move(mov, revert_info);
 
-                // Longer checkmate sequences have lower value.
-
-                if value > CHECKMATE_DELTA {
-                    value -= CHECKMATE_DELTA;
-                }
-                else if value < -CHECKMATE_DELTA {
-                    value += CHECKMATE_DELTA;
-                }
+                apply_penalty_for_extra_move_if_checkmate(&mut value);
 
                 if value > max {
                     max = value;
                     max_move = Some(mov);
                     bound = rec_bound.invert();
+                    alpha = alpha.max(max);
                 }
-
-                alpha = alpha.max(max);
 
                 if alpha >= beta {
                     bound = ValueBound::Lower;
