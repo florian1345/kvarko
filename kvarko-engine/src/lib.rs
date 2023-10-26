@@ -745,7 +745,7 @@ where
     H: PositionHasher,
     H::Hash: TTableHash
 {
-    kvarko_engine_with_ttable_bits(deepen_for, opening_book, 20, 18)
+    kvarko_engine_with_ttable_bits(deepen_for, opening_book, 22, 16)
 }
 
 /// Constructs a [KvarkoEngine] with given transposition table sizes.
