@@ -74,7 +74,9 @@ pub trait StateEvaluator<H: PositionHasher> {
 pub trait BaseEvaluator<H: PositionHasher> {
 
     /// Provides an evaluation for the given state from the player's
-    /// perspective whose turn it currently is.
+    /// perspective whose turn it currently is. Consider calling
+    /// [BaseEvaluator::evaluate_state_with_precomputed_data] if you have the
+    /// required parameters at hand, in order to improve performance.
     ///
     /// # Arguments
     ///
@@ -83,10 +85,6 @@ pub trait BaseEvaluator<H: PositionHasher> {
     /// the same state as before the method call.
     /// * `alpha`: The current alpha parameter from alpha-beta-pruning.
     /// * `beta`: The current beta parameter from alpha-beta-pruning.
-    /// * `moves`: If present, specifies the number of available moves for the
-    /// player whose turn it is.
-    /// * `check`: If available, specifies whether the player whose turn it is
-    /// is currently in check.
     ///
     /// # Returns
     ///
@@ -94,8 +92,40 @@ pub trait BaseEvaluator<H: PositionHasher> {
     /// current position, where negative numbers are more probably defeats than
     /// victories and positive numbers are more probably victories than
     /// defeats.
-    fn evaluate_state(&mut self, state: &mut State<H>, alpha: f32, beta: f32,
-        moves: Option<usize>, check: Option<bool>) -> f32;
+    fn evaluate_state(&mut self, state: &mut State<H>, alpha: f32, beta: f32)
+            -> f32 {
+        let (moves, check) = movement::count_moves(state.position());
+
+        self.evaluate_state_with_precomputed_data(
+            state, alpha, beta, moves, check)
+    }
+
+    /// Provides an evaluation for the given state from the player's
+    /// perspective whose turn it currently is. This function is called with
+    /// additional data about the state which does not need to be recomputed.
+    /// If you do not have this data available, call
+    /// [BaseEvaluator::evaluate_state] instead.
+    ///
+    /// # Arguments
+    ///
+    /// * `state`: A mutable reference to the current game [State]. This also
+    /// contains information about the player whose turn it is. Must be left in
+    /// the same state as before the method call.
+    /// * `alpha`: The current alpha parameter from alpha-beta-pruning.
+    /// * `beta`: The current beta parameter from alpha-beta-pruning.
+    /// * `moves`: The number of available moves for the player whose turn it
+    /// is.
+    /// * `check`: `true`, if and only if the player whose turn it is is
+    /// currently in check.
+    ///
+    /// # Returns
+    ///
+    /// As a first return parameter, this function returns an evaluation of the
+    /// current position, where negative numbers are more probably defeats than
+    /// victories and positive numbers are more probably victories than
+    /// defeats.
+    fn evaluate_state_with_precomputed_data(&mut self, state: &mut State<H>,
+        alpha: f32, beta: f32, move_count: usize, check: bool) -> f32;
 }
 
 const CHECKMATE_DELTA: f32 = 1_000_000.0;
@@ -197,22 +227,15 @@ fn evaluate_if_no_moves_remain(check: bool) -> f32 {
 
 impl<H: PositionHasher> BaseEvaluator<H> for KvarkoBaseEvaluator {
 
-    fn evaluate_state(&mut self, state: &mut State<H>, _: f32, _: f32,
-            moves: Option<usize>, check: Option<bool>) -> f32 {
+    fn evaluate_state_with_precomputed_data(&mut self, state: &mut State<H>,
+            _: f32, _: f32, move_count: usize, check: bool) -> f32 {
         if state.is_stateful_draw() {
             return 0.0;
         }
 
         let turn = state.position().turn();
-        let (moves, check) =
-            if let (Some(moves), Some(check)) = (moves, check) {
-                (moves, check)
-            }
-            else {
-                movement::count_moves(state.position())
-            };
 
-        if moves == 0 {
+        if move_count == 0 {
             return evaluate_if_no_moves_remain(check)
         }
 
@@ -223,7 +246,7 @@ impl<H: PositionHasher> BaseEvaluator<H> for KvarkoBaseEvaluator {
             movement::count_moves(&position).0
         };
         let board = state.position().board();
-        let mut value = (moves as f32 - opponent_moves as f32) *
+        let mut value = (move_count as f32 - opponent_moves as f32) *
             self.move_value;
 
         for piece in RELEVANT_PIECES {
@@ -407,8 +430,8 @@ where
 
         // Actor can stop trading now, if they want.
 
-        let mut max = self.base_evaluator.evaluate_state(
-            state, alpha, beta, Some(move_count), Some(check));
+        let mut max = self.base_evaluator.evaluate_state_with_precomputed_data(
+            state, alpha, beta, move_count, check);
         alpha = alpha.max(max);
         let mut bound = ValueBound::Exact;
 
@@ -451,9 +474,14 @@ where
     L: ListMovesIn,
     S: Presorter
 {
-    fn evaluate_state(&mut self, state: &mut State<H>, alpha: f32, beta: f32,
-            _: Option<usize>, _: Option<bool>) -> f32 {
+    fn evaluate_state(&mut self, state: &mut State<H>, alpha: f32, beta: f32)
+            -> f32 {
         self.evaluate_rec(state, alpha, beta).0
+    }
+
+    fn evaluate_state_with_precomputed_data(&mut self, state: &mut State<H>,
+            alpha: f32, beta: f32, _: usize, _: bool) -> f32 {
+        self.evaluate_state(state, alpha, beta)
     }
 }
 
@@ -501,7 +529,10 @@ where
         let depth = bufs.len() as u32;
 
         if depth == 1 {
-            return (self.base_evaluator.evaluate_state(state, alpha, beta, None, None), None, ValueBound::Exact);
+            let evaluation =
+                self.base_evaluator.evaluate_state(state, alpha, beta);
+
+            return (evaluation, None, ValueBound::Exact);
         }
 
         if state.is_stateful_draw() {
@@ -773,9 +804,9 @@ mod tests {
         let mut base_evaluator = KvarkoBaseEvaluator::default();
 
         let no_doubled_pawns_eval = base_evaluator.evaluate_state(
-            &mut no_doubled_pawns, f32::NEG_INFINITY, f32::INFINITY, None, None);
+            &mut no_doubled_pawns, f32::NEG_INFINITY, f32::INFINITY);
         let doubled_pawns_eval = base_evaluator.evaluate_state(
-            &mut doubled_pawns, f32::NEG_INFINITY, f32::INFINITY, None, None);
+            &mut doubled_pawns, f32::NEG_INFINITY, f32::INFINITY);
 
         assert!(no_doubled_pawns_eval > doubled_pawns_eval + 0.01);
     }
