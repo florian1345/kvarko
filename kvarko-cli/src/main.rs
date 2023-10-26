@@ -9,7 +9,7 @@ use kvarko_model::hash::ZobristHasher;
 use kvarko_model::movement::{self, Move};
 use kvarko_model::state::State;
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 mod args;
 mod book;
@@ -42,7 +42,7 @@ fn perft(fen: &str, depth: usize) -> Result<usize, FenError> {
     Ok(perft_rec(&mut state, depth, &mut moves))
 }
 
-fn eval(history: &str, depth: u32)
+fn eval(history: &str, max_elapsed_time_for_deepening: Duration)
         -> Result<(f32, Option<Move>), AlgebraicError> {
     let mut state: State<ZobristHasher<u64>> = State::initial();
 
@@ -51,7 +51,8 @@ fn eval(history: &str, depth: u32)
         state.make_move(&mov);
     }
 
-    let mut engine = kvarko_engine::kvarko_engine(depth, None);
+    let mut engine =
+        kvarko_engine::kvarko_engine(max_elapsed_time_for_deepening, None);
     Ok(engine.evaluate_state(&mut state))
 }
 
@@ -77,10 +78,10 @@ fn main() {
                 }
             }
         },
-        Command::Eval { history, depth } => {
+        Command::Eval { history, deepen_for: max_elapsed_time_for_deepening } => {
             let before = Instant::now();
 
-            match eval(&history, depth) {
+            match eval(&history, max_elapsed_time_for_deepening) {
                 Ok((v, _mov)) => {
                     let after = Instant::now();
                     let runtime = (after - before).as_secs_f64();

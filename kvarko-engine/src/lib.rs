@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::iter;
+use std::time::{Duration, Instant};
 
 use kvarko_model::board::Bitboard;
 use kvarko_model::game::Controller;
@@ -494,8 +495,6 @@ where
     }
 }
 
-const NO_TRANSPOSITION_SEARCH: u32 = 0;
-
 /// A [StateEvaluator] that does a negimax tree search on the input state,
 /// using alpha-beta-pruning.
 #[derive(Clone)]
@@ -506,7 +505,7 @@ where
 {
     base_evaluator: E,
     presorter: S,
-    search_depth: u32,
+    deepen_for: Duration,
     ttable: TranspositionTable<H, TreeSearchTableEntry, DepthAndBound>
 }
 
@@ -515,12 +514,12 @@ where
     H: PositionHasher,
     H::Hash: TTableHash
 {
-    pub fn new(base_evaluator: E, presorter: S, search_depth: u32,
+    pub fn new(base_evaluator: E, presorter: S, max_elapsed_time_for_deepening: Duration,
             ttable_bits: u32) -> TreeSearchEvaluator<H, E, S> {
         TreeSearchEvaluator {
             base_evaluator,
             presorter,
-            search_depth,
+            deepen_for: max_elapsed_time_for_deepening,
             ttable: TranspositionTable::new(ttable_bits, DepthAndBound)
         }
     }
@@ -552,9 +551,7 @@ where
             let entry = self.ttable.get_entry(state.position_hash());
 
             if let Some(entry) = entry {
-                if depth <= self.search_depth + 1 - NO_TRANSPOSITION_SEARCH &&
-                        entry.depth == depth &&
-                        should_use_ttable_entry(&mut alpha, &mut beta, entry) {
+                if entry.depth == depth && should_use_ttable_entry(&mut alpha, &mut beta, entry) {
                     let mov = entry.recommended_move;
                     return (entry.eval, Some(mov), entry.bound)
                 }
@@ -625,12 +622,19 @@ where
     S: Presorter
 {
     fn evaluate_state(&mut self, state: &mut State<H>) -> (f32, Option<Move>) {
-        let mut bufs = iter::repeat_with(Vec::new)
-            .take(self.search_depth as usize + 1)
-            .collect::<Vec<_>>();
+        let mut bufs = vec![Vec::new()];
         self.ttable.clear();
-        let (value, mov, _) = self.evaluate_rec(
-            state, &mut bufs, f32::NEG_INFINITY, f32::INFINITY);
+        let mut value = 0.0;
+        let mut mov = None;
+        let before = Instant::now();
+
+        while (Instant::now() - before) < self.deepen_for {
+            (value, mov, _) = self.evaluate_rec(
+                state, &mut bufs, f32::NEG_INFINITY, f32::INFINITY);
+            bufs.push(Vec::new());
+        }
+
+        println!("depth: {}", bufs.len() - 1);
 
         (value, mov)
     }
@@ -725,9 +729,9 @@ where
 ///
 /// # Arguments
 ///
-/// * `depth`: The maximum search depth to which to search the game tree. Depth
-/// is counted in half-moves (ply), i.e. a depth of 2 would search all
-/// possibilities for 2 ply.
+/// * `deepen_for`: If search at some depth is finished within this duration, a
+/// search of a depth one higher is started. The new search is always awaited,
+/// so this is not an upper bound in any way.
 /// * `opening_book`: Optionally, specifies an [OpeningBook] for the engine to
 /// use.
 ///
@@ -735,22 +739,22 @@ where
 ///
 /// A [StateEvaluatingController] wrapped around a [KvarkoEngine] with the
 /// given parameters.
-pub fn kvarko_engine<H>(depth: u32, opening_book: Option<OpeningBook>)
+pub fn kvarko_engine<H>(deepen_for: Duration, opening_book: Option<OpeningBook>)
     -> StateEvaluatingController<KvarkoEngine<H>>
 where
     H: PositionHasher,
     H::Hash: TTableHash
 {
-    kvarko_engine_with_ttable_bits(depth, opening_book, 20, 18)
+    kvarko_engine_with_ttable_bits(deepen_for, opening_book, 20, 18)
 }
 
 /// Constructs a [KvarkoEngine] with given transposition table sizes.
 ///
 /// # Arguments
 ///
-/// * `depth`: The maximum search depth to which to search the game tree. Depth
-/// is counted in half-moves (ply), i.e. a depth of 2 would search all
-/// possibilities for 2 ply.
+/// * `deepen_for`: If search at some depth is finished within this duration, a
+/// search of a depth one higher is started. The new search is always awaited,
+/// so this is not an upper bound in any way.
 /// * `opening_book`: Optionally, specifies an [OpeningBook] for the engine to
 /// use.
 /// * `tree_search_ttable_bits`: The number of significant bits used for
@@ -762,7 +766,7 @@ where
 ///
 /// A [StateEvaluatingController] wrapped around a [KvarkoEngine] with the
 /// given parameters.
-pub fn kvarko_engine_with_ttable_bits<H>(depth: u32,
+pub fn kvarko_engine_with_ttable_bits<H>(deepen_for: Duration,
     opening_book: Option<OpeningBook>, tree_search_ttable_bits: u32,
     quiescence_search_ttable_bits: u32)
     -> StateEvaluatingController<KvarkoEngine<H>>
@@ -780,7 +784,7 @@ where
                 quiescence_search_ttable_bits
             ),
             CaptureValuePresorter::new(),
-            depth,
+            deepen_for,
             tree_search_ttable_bits
         )
     })

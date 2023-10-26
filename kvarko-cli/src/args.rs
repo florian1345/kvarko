@@ -1,3 +1,5 @@
+use std::num::ParseIntError;
+use std::time::Duration;
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Subcommand)]
@@ -23,8 +25,8 @@ pub(crate) enum Command {
         #[clap(long, default_value = "")]
         history: String,
 
-        #[clap(long)]
-        depth: u32
+        #[clap(short, long, value_parser = parse_duration)]
+        deepen_for: Duration
     },
 
     MakeBook {
@@ -48,4 +50,9 @@ pub(crate) struct Args {
 
     #[clap(subcommand)]
     pub(crate) command: Command
+}
+
+fn parse_duration(arg: &str) -> Result<Duration, ParseIntError> {
+    let seconds = arg.parse()?;
+    Ok(Duration::from_secs(seconds))
 }

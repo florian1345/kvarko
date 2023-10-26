@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::thread;
+use std::time::Duration;
 
 use ggez::{Context, GameResult};
 use ggez::event::{EventHandler, MouseButton};
@@ -17,7 +18,7 @@ use crate::ui::{Button, Label, Ui, Alignment, AxisAlignment};
 struct GameSettings {
     white_kvarko: bool,
     black_kvarko: bool,
-    depth: u32,
+    deepen_for: Duration,
     use_opening_book: bool,
     start: bool
 }
@@ -32,7 +33,7 @@ impl MenuState {
         let mut ui = Ui::new(GameSettings {
             white_kvarko: false,
             black_kvarko: true,
-            depth: 6,
+            deepen_for: Duration::from_secs(5),
             use_opening_book: true,
             start: false
         });
@@ -115,7 +116,7 @@ impl MenuState {
                 screen.h * 0.45,
                 screen.w * 0.2,
                 screen.h * 0.07
-            ), Color::WHITE, "6".to_owned(), 24.0));
+            ), Color::WHITE, "5 s".to_owned(), 24.0));
 
         ui.add_element(Label::new(
             Rect::new(
@@ -180,10 +181,10 @@ impl MenuState {
         });
 
         ui.set_on_clicked_action(depth_button, move |_, ui, _| {
-            let new_depth = (ui.data().depth % 10) + 2;
-            let new_text = new_depth.to_string();
+            let new_deepen_for_secs = ui.data().deepen_for.as_secs() % 10 + 1;
+            let new_text = format!("{} s", new_deepen_for_secs);
 
-            ui.data_mut().depth = new_depth;
+            ui.data_mut().deepen_for = Duration::from_secs(new_deepen_for_secs);
             ui.element_mut::<Button>(depth_button).set_text(new_text);
         });
 
@@ -263,7 +264,7 @@ impl GameState for MenuState {
                     None
                 };
 
-                Some(kvarko_engine::kvarko_engine(settings.depth, opening_book))
+                Some(kvarko_engine::kvarko_engine(settings.deepen_for, opening_book))
             }
             else {
                 None
