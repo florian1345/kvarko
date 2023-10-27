@@ -296,7 +296,7 @@ impl<H: PositionHasher> BaseEvaluator<H> for KvarkoBaseEvaluator {
             + self.evaluate_material(board, turn, opponent)
             + self.evaluate_doubled_pawns(own_pawns, opponent_pawns)
             + self.evaluate_pawn_ranks(turn, own_pawns)
-            - self.evaluate_pawn_ranks(turn, opponent_pawns)
+            - self.evaluate_pawn_ranks(opponent, opponent_pawns)
     }
 }
 
