@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::iter;
 use std::time::{Duration, Instant};
 
-use kvarko_model::board::Bitboard;
+use kvarko_model::board::{Bitboard, Board};
 use kvarko_model::game::Controller;
 use kvarko_model::hash::PositionHasher;
 use kvarko_model::movement::{self, Move, MoveProcessor};
@@ -202,6 +202,51 @@ impl KvarkoBaseEvaluator {
         sixth_rank_pawns as f32 * self.pawn_sixth_rank_value +
             seventh_rank_pawns as f32 * self.pawn_seventh_rank_value
     }
+
+    #[inline]
+    fn evaluate_move_count(&self, position: &Position, move_count: usize,
+            opponent: Player) -> f32 {
+        let opponent_moves = {
+            let mut position = position.clone();
+            position.set_turn(opponent);
+            movement::count_moves(&position).0
+        };
+
+        (move_count as f32 - opponent_moves as f32) * self.move_value
+    }
+
+    #[inline]
+    fn evaluate_material(&self, board: &Board, turn: Player, opponent: Player)
+            -> f32 {
+        let mut value = 0.0;
+
+        for piece in RELEVANT_PIECES {
+            let piece_value = self.values[piece as usize];
+
+            value += piece_value *
+                board.of_player_and_kind(turn, piece).len() as f32;
+            value -= piece_value *
+                board.of_player_and_kind(opponent, piece).len() as f32;
+        }
+
+        value
+    }
+
+    #[inline]
+    fn evaluate_doubled_pawns(&self, own_pawns: Bitboard,
+            opponent_pawns: Bitboard) -> f32 {
+        let mut value = 0.0;
+
+        for file in FILES {
+            let own_pawns = (own_pawns & file).len().saturating_sub(1);
+            value -= self.doubled_pawn_penalty * own_pawns as f32;
+
+            let opponent_pawns = (opponent_pawns & file).len().saturating_sub(1);
+            value += self.doubled_pawn_penalty * opponent_pawns as f32;
+        }
+
+        value
+    }
 }
 
 impl Default for KvarkoBaseEvaluator {
@@ -234,46 +279,24 @@ impl<H: PositionHasher> BaseEvaluator<H> for KvarkoBaseEvaluator {
             return 0.0;
         }
 
-        let turn = state.position().turn();
+        let position = state.position();
+        let turn = position.turn();
 
         if move_count == 0 {
             return evaluate_if_no_moves_remain(check)
         }
 
         let opponent = turn.opponent();
-        let opponent_moves = {
-            let mut position = state.position().clone();
-            position.set_turn(opponent);
-            movement::count_moves(&position).0
-        };
-        let board = state.position().board();
-        let mut value = (move_count as f32 - opponent_moves as f32) *
-            self.move_value;
-
-        for piece in RELEVANT_PIECES {
-            let piece_value = self.values[piece as usize];
-
-            value += piece_value *
-                board.of_player_and_kind(turn, piece).len() as f32;
-            value -= piece_value *
-                board.of_player_and_kind(opponent, piece).len() as f32;
-        }
+        let board = position.board();
 
         let own_pawns = board.of_player_and_kind(turn, Piece::Pawn);
         let opponent_pawns = board.of_player_and_kind(opponent, Piece::Pawn);
 
-        for file in FILES {
-            let own_pawns = (own_pawns & file).len().saturating_sub(1);
-            value -= self.doubled_pawn_penalty * own_pawns as f32;
-
-            let opponent_pawns = (opponent_pawns & file).len().saturating_sub(1);
-            value += self.doubled_pawn_penalty * opponent_pawns as f32;
-        }
-
-        value += self.evaluate_pawn_ranks(turn, own_pawns);
-        value -= self.evaluate_pawn_ranks(turn, opponent_pawns);
-
-        value
+        self.evaluate_move_count(position, move_count, opponent)
+            + self.evaluate_material(board, turn, opponent)
+            + self.evaluate_doubled_pawns(own_pawns, opponent_pawns)
+            + self.evaluate_pawn_ranks(turn, own_pawns)
+            - self.evaluate_pawn_ranks(turn, opponent_pawns)
     }
 }
 
