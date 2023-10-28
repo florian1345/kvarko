@@ -518,6 +518,20 @@ where
     }
 }
 
+#[inline]
+fn presort_moves(presorter: &mut impl Presorter, moves: &mut Vec<Move>,
+        position: &Position, ttable_entry: Option<&TreeSearchTableEntry>) {
+    if let Some(entry) = ttable_entry {
+        let recommended_idx = moves.iter().enumerate()
+            .find(|(_, m)| *m == &entry.recommended_move)
+            .unwrap().0;
+        moves.swap(0, recommended_idx);
+        presorter.pre_sort(&mut moves[1..], position);
+    } else {
+        presorter.pre_sort(moves, position);
+    }
+}
+
 /// A [StateEvaluator] that does a negimax tree search on the input state,
 /// using alpha-beta-pruning.
 #[derive(Clone)]
@@ -568,72 +582,65 @@ where
 
         if state.is_stateful_draw() {
             // Checkmate is covered later
-            (0.0, None, ValueBound::Exact)
+            return (0.0, None, ValueBound::Exact);
         }
-        else {
-            let entry = self.ttable.get_entry(state.position_hash());
 
-            if let Some(entry) = entry {
-                if entry.depth == depth && should_use_ttable_entry(&mut alpha, &mut beta, entry) {
-                    let mov = entry.recommended_move;
-                    return (entry.eval, Some(mov), entry.bound)
-                }
+        let ttable_entry = self.ttable.get_entry(state.position_hash());
+
+        if let Some(entry) = ttable_entry {
+            if entry.depth == depth && should_use_ttable_entry(&mut alpha, &mut beta, entry) {
+                let mov = entry.recommended_move;
+                return (entry.eval, Some(mov), entry.bound)
             }
-
-            let (moves, bufs_rest) = bufs.split_first_mut().unwrap();
-            moves.clear();
-            let check = movement::list_moves_in(state.position(), moves);
-
-            if moves.is_empty() {
-                return (evaluate_if_no_moves_remain(check), None, ValueBound::Exact);
-            }
-
-            self.presorter.pre_sort(moves, state.position());
-
-            if let Some(entry) = entry {
-                let recommended_idx = moves.iter().enumerate()
-                    .find(|(_, m)| *m == &entry.recommended_move)
-                    .unwrap().0;
-                moves.swap(0, recommended_idx);
-            }
-
-            let mut max = f32::NEG_INFINITY;
-            let mut max_move = None;
-            let mut bound = ValueBound::Exact;
-
-            for mov in moves {
-                let revert_info = state.make_move(mov);
-                let (rec_value, _, rec_bound) =
-                    self.evaluate_rec(state, bufs_rest, -beta, -alpha);
-                let mut value = -rec_value;
-                state.unmake_move(mov, revert_info);
-
-                apply_penalty_for_extra_move_if_checkmate(&mut value);
-
-                if value > max {
-                    max = value;
-                    max_move = Some(mov);
-                    bound = rec_bound.invert();
-                    alpha = alpha.max(max);
-                }
-
-                if alpha >= beta {
-                    bound = ValueBound::Lower;
-                    break;
-                }
-            }
-
-            let max_move = max_move.cloned().unwrap();
-            self.ttable.enter(
-                state.position_hash(), TreeSearchTableEntry {
-                    depth,
-                    eval: max,
-                    recommended_move: max_move,
-                    bound
-                });
-
-            (max, Some(max_move), bound)
         }
+
+        let position = state.position();
+        let (moves, bufs_rest) = bufs.split_first_mut().unwrap();
+        moves.clear();
+        let check = movement::list_moves_in(position, moves);
+
+        if moves.is_empty() {
+            return (evaluate_if_no_moves_remain(check), None, ValueBound::Exact);
+        }
+
+        presort_moves(&mut self.presorter, moves, position, ttable_entry);
+
+        let mut max = f32::NEG_INFINITY;
+        let mut max_move = None;
+        let mut bound = ValueBound::Exact;
+
+        for mov in moves {
+            let revert_info = state.make_move(mov);
+            let (rec_value, _, rec_bound) =
+                self.evaluate_rec(state, bufs_rest, -beta, -alpha);
+            let mut value = -rec_value;
+            state.unmake_move(mov, revert_info);
+
+            apply_penalty_for_extra_move_if_checkmate(&mut value);
+
+            if value > max {
+                max = value;
+                max_move = Some(mov);
+                bound = rec_bound.invert();
+                alpha = alpha.max(max);
+            }
+
+            if alpha >= beta {
+                bound = ValueBound::Lower;
+                break;
+            }
+        }
+
+        let max_move = max_move.cloned().unwrap();
+        self.ttable.enter(
+            state.position_hash(), TreeSearchTableEntry {
+                depth,
+                eval: max,
+                recommended_move: max_move,
+                bound
+            });
+
+        (max, Some(max_move), bound)
     }
 }
 
