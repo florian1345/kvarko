@@ -470,6 +470,11 @@ where
         let mut bound = ValueBound::Exact;
 
         for mov in &moves {
+            if alpha >= beta {
+                bound = ValueBound::Lower;
+                break;
+            }
+
             let revert_info = state.make_move(mov);
             let (value, rec_bound) =
                 self.evaluate_rec(state, -beta, -alpha);
@@ -480,11 +485,6 @@ where
                 max = value;
                 bound = rec_bound.invert();
                 alpha = alpha.max(max);
-            }
-
-            if alpha >= beta {
-                bound = ValueBound::Lower;
-                break;
             }
         }
 
@@ -585,10 +585,11 @@ where
             return (0.0, None, ValueBound::Exact);
         }
 
-        let ttable_entry = self.ttable.get_entry(state.position_hash());
+        let position_hash = state.position_hash();
+        let ttable_entry = self.ttable.get_entry(position_hash);
 
         if let Some(entry) = ttable_entry {
-            if entry.depth == depth && should_use_ttable_entry(&mut alpha, &mut beta, entry) {
+            if entry.depth >= depth && should_use_ttable_entry(&mut alpha, &mut beta, entry) {
                 let mov = entry.recommended_move;
                 return (entry.eval, Some(mov), entry.bound)
             }
@@ -623,17 +624,17 @@ where
                 max_move = Some(mov);
                 bound = rec_bound.invert();
                 alpha = alpha.max(max);
-            }
 
-            if alpha >= beta {
-                bound = ValueBound::Lower;
-                break;
+                if alpha >= beta {
+                    bound = ValueBound::Lower;
+                    break;
+                }
             }
         }
 
         let max_move = max_move.cloned().unwrap();
         self.ttable.enter(
-            state.position_hash(), TreeSearchTableEntry {
+            position_hash, TreeSearchTableEntry {
                 depth,
                 eval: max,
                 recommended_move: max_move,
