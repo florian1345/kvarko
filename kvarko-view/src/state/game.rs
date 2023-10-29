@@ -1,6 +1,5 @@
-use crate::state::{Action, GameState, PopupState, Transition, DynGameState};
-use crate::sync::{Requester, self, Responder, ResponseHandle};
-use crate::ui::Button;
+use std::collections::{HashMap, HashSet};
+use std::sync::mpsc::{self, Receiver, Sender};
 
 use ggez::{Context, GameResult};
 use ggez::event::{EventHandler, MouseButton};
@@ -9,23 +8,24 @@ use ggez::graphics::{
     Align,
     Color,
     DrawMode,
-    Mesh,
-    Rect,
     DrawParam,
     Image,
+    Mesh,
+    Rect,
     Text
 };
 
 use kvarko_model::board::{self, Location};
-use kvarko_model::game::{Observer, Controller};
+use kvarko_model::game::{Controller, Observer};
 use kvarko_model::hash::ZobristHasher;
 use kvarko_model::movement::{self, Move};
 use kvarko_model::piece::Piece;
 use kvarko_model::player::Player;
 use kvarko_model::state::Outcome;
 
-use std::collections::{HashMap, HashSet};
-use std::sync::mpsc::{self, Receiver, Sender};
+use crate::state::{Action, DynGameState, GameState, PopupState, Transition};
+use crate::sync::{self, Requester, Responder, ResponseHandle};
+use crate::ui::Button;
 
 type State = kvarko_model::state::State<ZobristHasher<u64>>;
 
@@ -396,7 +396,7 @@ impl GameState for GameplayState {
 
     fn transition(&mut self, _ctx: &mut Context) -> Transition {
         if let Some(awaiting_moves) = &self.awaiting_moves {
-            let mut buttons: Vec<(Button, Action<GameplayState>)> = awaiting_moves.iter()
+            let buttons: Vec<(Button, Action<GameplayState>)> = awaiting_moves.iter()
                 .map(|m| {
                     let piece = match m {
                         Move::Promotion { promotion, .. } => *promotion,
@@ -434,7 +434,7 @@ impl GameState for GameplayState {
 
             Transition::change(move |ctx, this: GameplayState|
                 DynGameState::new(
-                    PopupState::new(ctx, this, "Select promotion", buttons.drain(..).collect())))
+                    PopupState::new(ctx, this, "Select promotion", buttons)))
         }
         else if let Some(outcome) = self.outcome.take() {
             let text = match outcome {
@@ -447,12 +447,12 @@ impl GameState for GameplayState {
             ok_button.set_bounds([size, size], Align::Center);
             let ok_button =
                 Button::new(button_rect(), Color::WHITE, "Ok".into(), 32.0);
-            let mut buttons: Vec<(Button, Action<GameplayState>)> =
+            let buttons: Vec<(Button, Action<GameplayState>)> =
                 vec![(ok_button, Box::new(|_| { }))];
 
             Transition::change(move |ctx, this: GameplayState|
                 DynGameState::new(
-                    PopupState::new(ctx, this, text, buttons.drain(..).collect())))
+                    PopupState::new(ctx, this, text, buttons)))
         }
         else {
             Transition::None
