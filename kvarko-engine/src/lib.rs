@@ -35,13 +35,13 @@ impl Eq for OrdF32 { }
 
 impl PartialOrd for OrdF32 {
     fn partial_cmp(&self, other: &OrdF32) -> Option<Ordering> {
-        self.0.partial_cmp(&other.0)
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for OrdF32 {
     fn cmp(&self, other: &OrdF32) -> Ordering {
-        self.partial_cmp(other).unwrap()
+        self.0.partial_cmp(&other.0).unwrap()
     }
 }
 
@@ -519,7 +519,7 @@ where
 }
 
 #[inline]
-fn presort_moves(presorter: &mut impl Presorter, moves: &mut Vec<Move>,
+fn presort_moves(presorter: &mut impl Presorter, moves: &mut [Move],
         position: &Position, ttable_entry: Option<&TreeSearchTableEntry>) {
     if let Some(entry) = ttable_entry {
         let recommended_idx = moves.iter().enumerate()

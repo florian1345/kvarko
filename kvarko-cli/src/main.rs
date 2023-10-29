@@ -15,8 +15,7 @@ mod args;
 mod book;
 
 fn perft(fen: &str, depth: usize) -> Result<usize, FenError> {
-    fn perft_rec(state: &mut State<ZobristHasher<u64>>, depth: usize,
-            moves: &mut Vec<Move>) -> usize {
+    fn perft_rec(state: &mut State<ZobristHasher<u64>>, depth: usize) -> usize {
         if depth == 0 {
             return 1;
         }
@@ -29,7 +28,7 @@ fn perft(fen: &str, depth: usize) -> Result<usize, FenError> {
     
         for mov in movement::list_moves(state.position()).0 {
             let revert_info = state.make_move(&mov);
-            sum += perft_rec(state, depth - 1, moves);
+            sum += perft_rec(state, depth - 1);
             state.unmake_move(&mov, revert_info);
         }
     
@@ -37,9 +36,8 @@ fn perft(fen: &str, depth: usize) -> Result<usize, FenError> {
     }
 
     let mut state = State::from_fen(fen)?;
-    let mut moves = Vec::new();
 
-    Ok(perft_rec(&mut state, depth, &mut moves))
+    Ok(perft_rec(&mut state, depth))
 }
 
 fn eval(history: &str, max_elapsed_time_for_deepening: Duration)
