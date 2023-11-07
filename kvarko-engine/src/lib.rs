@@ -45,10 +45,27 @@ impl Ord for OrdF32 {
     }
 }
 
+/// The output given by a [StateEvaluator] on evaluation of a state.
+pub struct StateEvaluatorOutput<M> {
+
+    /// The evaluation of the position according to the evaluator.
+    pub evaluation: f32,
+
+    /// The move which the evaluator determined to be best.
+    pub recommended_move: Move,
+
+    /// Any metadata defined by the [StateEvaluator::Metadata].
+    pub metadata: M
+}
+
 /// A trait for types which can give an evaluation for a game [State], that is,
 /// a number representing how good the state is for the player whose turn it
 /// is.
 pub trait StateEvaluator<H: PositionHasher> {
+
+    /// Metadata provided by the state evaluator, for diagnostics or similar
+    /// purposes.
+    type Metadata;
 
     /// Provides an evaluation for the given state from the player's
     /// perspective whose turn it currently is.
@@ -61,12 +78,11 @@ pub trait StateEvaluator<H: PositionHasher> {
     ///
     /// # Returns
     ///
-    /// As a first return parameter, this function returns an evaluation of the
-    /// current position, where negative numbers are more probably defeats than
-    /// victories and positive numbers are more probably victories than
-    /// defeats. The optional second return parameter contains a recommended
-    /// move.
-    fn evaluate_state(&mut self, state: &mut State<H>) -> (f32, Option<Move>);
+    /// The [StateEvaluatorOutput] which contains the evaluation, recommended
+    /// move, and any evaluator-specific metadata defined by the
+    /// [StateEvaluator::Metadata] type.
+    fn evaluate_state(&mut self, state: &mut State<H>)
+        -> StateEvaluatorOutput<Self::Metadata>;
 }
 
 /// Similar to [StateEvaluator], however accepts additional parameters that are
@@ -573,7 +589,7 @@ where
             mut alpha: f32, mut beta: f32) -> (f32, Option<Move>, ValueBound) {
         let depth = bufs.len() as u32;
 
-        if depth == 1 {
+        if depth == 0 {
             let evaluation =
                 self.base_evaluator.evaluate_state(state, alpha, beta);
 
@@ -589,7 +605,7 @@ where
         let ttable_entry = self.ttable.get_entry(position_hash);
 
         if let Some(entry) = ttable_entry {
-            if entry.depth >= depth && should_use_ttable_entry(&mut alpha, &mut beta, entry) {
+            if entry.depth == depth && should_use_ttable_entry(&mut alpha, &mut beta, entry) {
                 let mov = entry.recommended_move;
                 return (entry.eval, Some(mov), entry.bound)
             }
@@ -645,6 +661,13 @@ where
     }
 }
 
+/// Metadata provided by the [TreeSearchEvaluator].
+pub struct TreeSearchEvaluatorMetadata {
+
+    /// The ply-depth to which was searched. A depth of 0 means all moves were
+    pub depth: usize
+}
+
 impl<H, E, S> StateEvaluator<H> for TreeSearchEvaluator<H, E, S>
 where
     H: PositionHasher,
@@ -652,22 +675,29 @@ where
     E: BaseEvaluator<H>,
     S: Presorter
 {
-    fn evaluate_state(&mut self, state: &mut State<H>) -> (f32, Option<Move>) {
-        let mut bufs = vec![Vec::new()];
+    type Metadata = TreeSearchEvaluatorMetadata;
+
+    fn evaluate_state(&mut self, state: &mut State<H>)
+            -> StateEvaluatorOutput<TreeSearchEvaluatorMetadata> {
+        let mut bufs = vec![];
         self.ttable.clear();
         let mut value = 0.0;
         let mut mov = None;
         let before = Instant::now();
 
-        while (Instant::now() - before) < self.deepen_for {
+        while mov.is_none() || (Instant::now() - before) < self.deepen_for {
             (value, mov, _) = self.evaluate_rec(
                 state, &mut bufs, f32::NEG_INFINITY, f32::INFINITY);
             bufs.push(Vec::new());
         }
 
-        println!("depth: {}", bufs.len() - 1);
-
-        (value, mov)
+        StateEvaluatorOutput {
+            evaluation: value,
+            recommended_move: mov.unwrap(),
+            metadata: TreeSearchEvaluatorMetadata {
+                depth: bufs.len() - 1
+            }
+        }
     }
 }
 
@@ -683,8 +713,10 @@ where
     H: PositionHasher,
     E: StateEvaluator<H>
 {
+    type Metadata = E::Metadata;
+
     fn evaluate_state(&mut self, state: &mut State<H>)
-            -> (f32, Option<Move>) {
+            -> StateEvaluatorOutput<E::Metadata> {
         self.0.evaluate_state(state)
     }
 }
@@ -697,17 +729,7 @@ where
     fn make_move(&mut self, state: &State<H>) -> Move {
         let mut state = state.clone();
 
-        if let Some(mov) = self.0.evaluate_state(&mut state).1 {
-            return mov;
-        }
-
-        movement::list_moves(state.position()).0.into_iter()
-            .max_by_key(|mov| {
-                let mut state = state.clone();
-                state.make_move(mov);
-                OrdF32(-self.0.evaluate_state(&mut state).0)
-            })
-            .unwrap()
+        self.0.evaluate_state(&mut state).recommended_move
     }
 }
 
@@ -720,6 +742,19 @@ type KvarkoEvaluator<H> = TreeSearchEvaluator<
         CaptureValuePresorter
     >,
     CaptureValuePresorter>;
+
+/// Metadata provided by the [KvarkoEngine].
+pub enum KvarkoEngineMetadata {
+
+    /// Indicates that the evaluated state was in the opening book and a book
+    /// move has been selected.
+    BookMove,
+
+    /// Indicates that the evaluated state was not in the opening book and a
+    /// move has been computed using tree search. The metadata of the tree
+    /// search is returned.
+    ComputedMove(TreeSearchEvaluatorMetadata)
+}
 
 /// A [StateEvaluator] that represents the totality of functionality contained
 /// in the Kvarko engine. In particular, this uses a [TreeSearchEvaluator]
@@ -743,16 +778,30 @@ where
     H: PositionHasher,
     H::Hash: TTableHash
 {
-    fn evaluate_state(&mut self, state: &mut State<H>) -> (f32, Option<Move>) {
+    type Metadata = KvarkoEngineMetadata;
+
+    fn evaluate_state(&mut self, state: &mut State<H>)
+            -> StateEvaluatorOutput<KvarkoEngineMetadata> {
         if let Some(opening_book) = &self.opening_book {
             if let Some(value) = opening_book.get_value(state) {
                 let best_move = opening_book.get_best_move(state).unwrap();
 
-                return (value, Some(*best_move));
+                return StateEvaluatorOutput {
+                    evaluation: value,
+                    recommended_move: *best_move,
+                    metadata: KvarkoEngineMetadata::BookMove
+                };
             }
         }
 
-        self.evaluator.evaluate_state(state)
+        let tree_search_output = self.evaluator.evaluate_state(state);
+
+        StateEvaluatorOutput {
+            evaluation: tree_search_output.evaluation,
+            recommended_move: tree_search_output.recommended_move,
+            metadata:
+                KvarkoEngineMetadata::ComputedMove(tree_search_output.metadata)
+        }
     }
 }
 

@@ -2,12 +2,12 @@ use crate::args::{Args, Command};
 
 use clap::Parser;
 
-use kvarko_engine::StateEvaluator;
+use kvarko_engine::{KvarkoEngineMetadata, StateEvaluator, StateEvaluatorOutput};
 
 use kvarko_model::error::{FenError, AlgebraicError};
 use kvarko_model::hash::ZobristHasher;
 use kvarko_model::movement::{self, Move};
-use kvarko_model::state::State;
+use kvarko_model::state::{Position, State};
 
 use std::time::{Duration, Instant};
 
@@ -40,8 +40,7 @@ fn perft(fen: &str, depth: usize) -> Result<usize, FenError> {
     Ok(perft_rec(&mut state, depth))
 }
 
-fn eval(history: &str, max_elapsed_time_for_deepening: Duration)
-        -> Result<(f32, Option<Move>), AlgebraicError> {
+fn parse_history_to_state(history: &str) -> Result<State<ZobristHasher<u64>>, AlgebraicError> {
     let mut state: State<ZobristHasher<u64>> = State::initial();
 
     for algebraic in history.split_whitespace() {
@@ -49,9 +48,40 @@ fn eval(history: &str, max_elapsed_time_for_deepening: Duration)
         state.make_move(&mov);
     }
 
-    let mut engine =
-        kvarko_engine::kvarko_engine(max_elapsed_time_for_deepening, None);
-    Ok(engine.evaluate_state(&mut state))
+    Ok(state)
+}
+
+fn evaluate_with_kvarko(state: &mut State<ZobristHasher<u64>>, deepen_for: Duration)
+        -> StateEvaluatorOutput<KvarkoEngineMetadata> {
+    kvarko_engine::kvarko_engine(deepen_for, None).evaluate_state(state)
+}
+
+fn log_eval_result(position: &Position, output: StateEvaluatorOutput<KvarkoEngineMetadata>,
+        runtime: Duration) {
+    let recommended_move_str = output.recommended_move.to_coordinate_notation(&position).unwrap();
+
+    println!("Evaluation: {}", output.evaluation);
+    println!("Recommended move: {}", recommended_move_str);
+    println!("Runtime: {:.03} s", runtime.as_secs_f64());
+
+    match output.metadata {
+        KvarkoEngineMetadata::BookMove =>
+            println!("Found book move"),
+        KvarkoEngineMetadata::ComputedMove(metadata) =>
+            println!("Search depth: {} ply", metadata.depth)
+    }
+}
+
+fn run_eval_command(history: &str, deepen_for: Duration) -> Result<(), AlgebraicError> {
+    let mut state = parse_history_to_state(history)?;
+    let position = state.position().clone();
+    let before = Instant::now();
+    let output = evaluate_with_kvarko(&mut state, deepen_for);
+    let runtime = Instant::now() - before;
+
+    log_eval_result(&position, output, runtime);
+
+    Ok(())
 }
 
 fn main() {
@@ -76,22 +106,10 @@ fn main() {
                 }
             }
         },
-        Command::Eval { history, deepen_for: max_elapsed_time_for_deepening } => {
-            let before = Instant::now();
-
-            match eval(&history, max_elapsed_time_for_deepening) {
-                Ok((v, _mov)) => {
-                    let after = Instant::now();
-                    let runtime = (after - before).as_secs_f64();
-
-                    println!("Evaluation: {}", v);
-                    println!("Runtime: {:.03} s", runtime);
-                },
-                Err(e) => {
-                    eprintln!("Error with algebraic notation: {}", e);
-                }
-            }
-        },
+        Command::Eval { history, deepen_for } =>
+            if let Err(e) = run_eval_command(&history, deepen_for) {
+                eprintln!("Error with algebraic notation: {}", e);
+            },
         Command::MakeBook { in_file, out_file, min_occurrences, max_depth } => {
             match book::make_book(
                     in_file, out_file, min_occurrences, max_depth) {
