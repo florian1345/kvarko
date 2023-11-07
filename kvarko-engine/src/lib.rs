@@ -414,6 +414,19 @@ fn apply_penalty_for_extra_move_if_checkmate(value: &mut f32) {
     }
 }
 
+#[inline]
+fn determine_bound(max: f32, alpha: f32, beta: f32) -> ValueBound {
+    if max >= beta {
+        ValueBound::Lower
+    }
+    else if max > alpha {
+        ValueBound::Exact
+    }
+    else {
+        ValueBound::Upper
+    }
+}
+
 /// A [BaseEvaluator] which does quiescense search on all moves provided by
 /// some [ListMovesIn] implementation. This searches the full tree, without any
 /// maximum depth. Alpha-beta-pruning is still applied.
@@ -461,12 +474,12 @@ where
     S: Presorter
 {
     fn evaluate_rec(&mut self, state: &mut State<H>, mut alpha: f32,
-            mut beta: f32) -> (f32, ValueBound) {
+            mut beta: f32) -> f32 {
         let entry = self.transposition_table.get_entry(state.position_hash());
 
         if let Some(entry) = entry {
             if should_use_ttable_entry(&mut alpha, &mut beta, entry) {
-                return (entry.eval, entry.bound);
+                return entry.eval;
             }
         }
 
@@ -483,23 +496,18 @@ where
         let mut max = self.base_evaluator.evaluate_state_with_precomputed_data(
             state, alpha, beta, move_count, check);
         alpha = alpha.max(max);
-        let mut bound = ValueBound::Exact;
 
         for mov in &moves {
             if alpha >= beta {
-                bound = ValueBound::Lower;
                 break;
             }
 
             let revert_info = state.make_move(mov);
-            let (value, rec_bound) =
-                self.evaluate_rec(state, -beta, -alpha);
-            let value = -value;
+            let value = -self.evaluate_rec(state, -beta, -alpha);
             state.unmake_move(mov, revert_info);
 
             if value > max {
                 max = value;
-                bound = rec_bound.invert();
                 alpha = alpha.max(max);
             }
         }
@@ -507,11 +515,11 @@ where
         self.transposition_table.enter(
             state.position_hash(), QuiescenceTableEntry {
                 eval: max,
-                bound
+                bound: determine_bound(max, alpha, beta)
             });
         self.bufs.push(moves);
 
-        (max, bound)
+        max
     }
 }
 
@@ -525,7 +533,7 @@ where
 {
     fn evaluate_state(&mut self, state: &mut State<H>, alpha: f32, beta: f32)
             -> f32 {
-        self.evaluate_rec(state, alpha, beta).0
+        self.evaluate_rec(state, alpha, beta)
     }
 
     fn evaluate_state_with_precomputed_data(&mut self, state: &mut State<H>,
@@ -586,19 +594,19 @@ where
     S: Presorter
 {
     fn evaluate_rec(&mut self, state: &mut State<H>, bufs: &mut [Vec<Move>],
-            mut alpha: f32, mut beta: f32) -> (f32, Option<Move>, ValueBound) {
+            mut alpha: f32, mut beta: f32) -> (f32, Option<Move>) {
         let depth = bufs.len() as u32;
 
         if depth == 0 {
             let evaluation =
                 self.base_evaluator.evaluate_state(state, alpha, beta);
 
-            return (evaluation, None, ValueBound::Exact);
+            return (evaluation, None);
         }
 
         if state.is_stateful_draw() {
             // Checkmate is covered later
-            return (0.0, None, ValueBound::Exact);
+            return (0.0, None);
         }
 
         let position_hash = state.position_hash();
@@ -607,7 +615,7 @@ where
         if let Some(entry) = ttable_entry {
             if entry.depth == depth && should_use_ttable_entry(&mut alpha, &mut beta, entry) {
                 let mov = entry.recommended_move;
-                return (entry.eval, Some(mov), entry.bound)
+                return (entry.eval, Some(mov))
             }
         }
 
@@ -617,18 +625,17 @@ where
         let check = movement::list_moves_in(position, moves);
 
         if moves.is_empty() {
-            return (evaluate_if_no_moves_remain(check), None, ValueBound::Exact);
+            return (evaluate_if_no_moves_remain(check), None);
         }
 
         presort_moves(&mut self.presorter, moves, position, ttable_entry);
 
         let mut max = f32::NEG_INFINITY;
         let mut max_move = None;
-        let mut bound = ValueBound::Exact;
 
         for mov in moves {
             let revert_info = state.make_move(mov);
-            let (rec_value, _, rec_bound) =
+            let (rec_value, _) =
                 self.evaluate_rec(state, bufs_rest, -beta, -alpha);
             let mut value = -rec_value;
             state.unmake_move(mov, revert_info);
@@ -638,11 +645,9 @@ where
             if value > max {
                 max = value;
                 max_move = Some(mov);
-                bound = rec_bound.invert();
                 alpha = alpha.max(max);
 
                 if alpha >= beta {
-                    bound = ValueBound::Lower;
                     break;
                 }
             }
@@ -654,10 +659,10 @@ where
                 depth,
                 eval: max,
                 recommended_move: max_move,
-                bound
+                bound: determine_bound(max, alpha, beta)
             });
 
-        (max, Some(max_move), bound)
+        (max, Some(max_move))
     }
 }
 
@@ -686,7 +691,7 @@ where
         let before = Instant::now();
 
         while mov.is_none() || (Instant::now() - before) < self.deepen_for {
-            (value, mov, _) = self.evaluate_rec(
+            (value, mov) = self.evaluate_rec(
                 state, &mut bufs, f32::NEG_INFINITY, f32::INFINITY);
             bufs.push(Vec::new());
         }

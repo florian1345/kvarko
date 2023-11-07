@@ -31,9 +31,6 @@ fn assert_ttable_size_irrelevant(fen: &str) {
             KvarkoEngineMetadata::BookMove => panic!(),
             KvarkoEngineMetadata::ComputedMove(metadata) => metadata.depth
         };
-        println!("depth {}", depth);
-        println!("bits {}", ttable_bits);
-        println!("{:?}", &expectations_by_depth);
 
         if let Some(&(expected_eval, expected_move)) = expectations_by_depth.get(&depth) {
             assert_eq!(expected_eval, output.evaluation);

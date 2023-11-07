@@ -1,10 +1,11 @@
+use std::fmt::Debug;
 use kvarko_model::hash::PositionHasher;
 use kvarko_model::movement::Move;
 
 use std::iter;
 
 /// A trait for types to be used as position hashes for transposition tables.
-pub trait TTableHash : Copy + Clone + Eq {
+pub trait TTableHash : Copy + Clone + Debug + Eq {
 
     /// Converts the hash into a `usize` index. In case this type is larger
     /// than `usize`, this shall return the least significant bits.
