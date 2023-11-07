@@ -21,12 +21,8 @@ impl TTableHash for u64 {
 /// An enumeration of the different bounds on the evaluation a transposition
 /// table entry can provide. This depends on the amount and kind of pruning
 /// that occurred during its evaluation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ValueBound {
-
-    /// The value provided is exact given the depth. This is the case if it
-    /// lied between alpha and beta.
-    Exact,
 
     /// The value provided is a lower bound on the actual value given the
     /// depth. This is the case if the node evaluation was shortcut due to the
@@ -36,7 +32,11 @@ pub enum ValueBound {
     /// The value provided is an upper bound on the actual value given the
     /// depth. This is the case if no child of the evaluated node managed to
     /// exceed the alpha value, in which case alpha is an upper bound.
-    Upper
+    Upper,
+
+    /// The value provided is exact given the depth. This is the case if it
+    /// lied between alpha and beta.
+    Exact
 }
 
 impl ValueBound {
@@ -95,8 +95,7 @@ impl ReplacementPolicy<TreeSearchTableEntry> for DepthAndBound {
     fn replace(&self, current: &TreeSearchTableEntry,
             new: &TreeSearchTableEntry) -> bool {
         new.depth > current.depth ||
-            new.bound == ValueBound::Exact &&
-            current.bound != ValueBound::Exact
+            (new.depth == current.depth && new.bound > current.bound)
     }
 }
 
