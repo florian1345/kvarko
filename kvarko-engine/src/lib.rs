@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::iter;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use kvarko_model::board::{Bitboard, Board};
 use kvarko_model::game::Controller;
@@ -11,6 +11,7 @@ use kvarko_model::player::Player;
 use kvarko_model::state::{Position, State};
 
 use crate::book::OpeningBook;
+use crate::depth::{DepthStrategy, IterativeDeepeningForDuration};
 use crate::sort::{CaptureValuePresorter, Presorter};
 use crate::ttable::{
     AlwaysReplace,
@@ -24,6 +25,7 @@ use crate::ttable::{
 };
 
 pub mod book;
+pub mod depth;
 pub mod ordering;
 pub mod sort;
 pub mod ttable;
@@ -559,34 +561,34 @@ fn presort_moves(presorter: &mut impl Presorter, moves: &mut [Move],
 /// A [StateEvaluator] that does a negimax tree search on the input state,
 /// using alpha-beta-pruning.
 #[derive(Clone)]
-pub struct TreeSearchEvaluator<H, E, S>
+pub struct TreeSearchEvaluator<H, E, S, D>
 where
     H: PositionHasher,
     H::Hash: TTableHash
 {
     base_evaluator: E,
     presorter: S,
-    deepen_for: Duration,
+    depth_strategy: D,
     ttable: TranspositionTable<H, TreeSearchTableEntry, DepthAndBound>
 }
 
-impl<H, E, S> TreeSearchEvaluator<H, E, S>
+impl<H, E, S, D> TreeSearchEvaluator<H, E, S, D>
 where
     H: PositionHasher,
     H::Hash: TTableHash
 {
-    pub fn new(base_evaluator: E, presorter: S, max_elapsed_time_for_deepening: Duration,
-            ttable_bits: u32) -> TreeSearchEvaluator<H, E, S> {
+    pub fn new(base_evaluator: E, presorter: S, depth_strategy: D,
+            ttable_bits: u32) -> TreeSearchEvaluator<H, E, S, D> {
         TreeSearchEvaluator {
             base_evaluator,
             presorter,
-            deepen_for: max_elapsed_time_for_deepening,
+            depth_strategy,
             ttable: TranspositionTable::new(ttable_bits, DepthAndBound)
         }
     }
 }
 
-impl<H, E, S> TreeSearchEvaluator<H, E, S>
+impl<H, E, S, D> TreeSearchEvaluator<H, E, S, D>
 where
     H: PositionHasher,
     H::Hash: TTableHash,
@@ -673,12 +675,21 @@ pub struct TreeSearchEvaluatorMetadata {
     pub depth: usize
 }
 
-impl<H, E, S> StateEvaluator<H> for TreeSearchEvaluator<H, E, S>
+fn get_mut_slice_of_len<T: Default>(vec: &mut Vec<T>, len: usize) -> &mut [T] {
+    while vec.len() < len {
+        vec.push(T::default());
+    }
+
+    &mut vec[..len]
+}
+
+impl<H, E, S, D> StateEvaluator<H> for TreeSearchEvaluator<H, E, S, D>
 where
     H: PositionHasher,
     H::Hash: TTableHash,
     E: BaseEvaluator<H>,
-    S: Presorter
+    S: Presorter,
+    D: DepthStrategy
 {
     type Metadata = TreeSearchEvaluatorMetadata;
 
@@ -688,12 +699,12 @@ where
         self.ttable.clear();
         let mut value = 0.0;
         let mut mov = None;
-        let before = Instant::now();
+        let mut depth_iterator = self.depth_strategy.depth_iterator();
 
-        while mov.is_none() || (Instant::now() - before) < self.deepen_for {
+        while let Some(depth) = depth_iterator.next() {
+            let bufs = get_mut_slice_of_len(&mut bufs, depth as usize);
             (value, mov) = self.evaluate_rec(
-                state, &mut bufs, f32::NEG_INFINITY, f32::INFINITY);
-            bufs.push(Vec::new());
+                state, bufs, f32::NEG_INFINITY, f32::INFINITY);
         }
 
         StateEvaluatorOutput {
@@ -738,7 +749,7 @@ where
     }
 }
 
-type KvarkoEvaluator<H> = TreeSearchEvaluator<
+type KvarkoEvaluator<H, D> = TreeSearchEvaluator<
     H,
     QuiescenseTreeSearchEvaluator<
         H,
@@ -746,7 +757,8 @@ type KvarkoEvaluator<H> = TreeSearchEvaluator<
         ListNonPawnCapturesIn,
         CaptureValuePresorter
     >,
-    CaptureValuePresorter>;
+    CaptureValuePresorter,
+    D>;
 
 /// Metadata provided by the [KvarkoEngine].
 pub enum KvarkoEngineMetadata {
@@ -769,19 +781,20 @@ pub enum KvarkoEngineMetadata {
 /// 
 /// Construct this engine using [kvarko_engine].
 #[derive(Clone)]
-pub struct KvarkoEngine<H>
+pub struct KvarkoEngine<H, D>
 where
     H: PositionHasher,
     H::Hash: TTableHash
 {
     opening_book: Option<OpeningBook>,
-    evaluator: KvarkoEvaluator<H>
+    evaluator: KvarkoEvaluator<H, D>
 }
 
-impl<H> StateEvaluator<H> for KvarkoEngine<H>
+impl<H, D> StateEvaluator<H> for KvarkoEngine<H, D>
 where
     H: PositionHasher,
-    H::Hash: TTableHash
+    H::Hash: TTableHash,
+    D: DepthStrategy
 {
     type Metadata = KvarkoEngineMetadata;
 
@@ -825,7 +838,7 @@ where
 /// A [StateEvaluatingController] wrapped around a [KvarkoEngine] with the
 /// given parameters.
 pub fn kvarko_engine<H>(deepen_for: Duration, opening_book: Option<OpeningBook>)
-    -> StateEvaluatingController<KvarkoEngine<H>>
+    -> StateEvaluatingController<KvarkoEngine<H, IterativeDeepeningForDuration>>
 where
     H: PositionHasher,
     H::Hash: TTableHash
@@ -854,7 +867,23 @@ where
 pub fn kvarko_engine_with_ttable_bits<H>(deepen_for: Duration,
     opening_book: Option<OpeningBook>, tree_search_ttable_bits: u32,
     quiescence_search_ttable_bits: u32)
-    -> StateEvaluatingController<KvarkoEngine<H>>
+    -> StateEvaluatingController<KvarkoEngine<H, IterativeDeepeningForDuration>>
+where
+    H: PositionHasher,
+    H::Hash: TTableHash
+{
+    let depth_strategy = IterativeDeepeningForDuration {
+        deepen_for
+    };
+
+    kvarko_engine_with_ttable_bits_and_depth_strategy(depth_strategy,
+        opening_book, tree_search_ttable_bits, quiescence_search_ttable_bits)
+}
+
+pub fn kvarko_engine_with_ttable_bits_and_depth_strategy<H, D>(depth_strategy: D,
+    opening_book: Option<OpeningBook>, tree_search_ttable_bits: u32,
+    quiescence_search_ttable_bits: u32)
+    -> StateEvaluatingController<KvarkoEngine<H, D>>
 where
     H: PositionHasher,
     H::Hash: TTableHash
@@ -869,7 +898,7 @@ where
                 quiescence_search_ttable_bits
             ),
             CaptureValuePresorter::new(),
-            deepen_for,
+            depth_strategy,
             tree_search_ttable_bits
         )
     })

@@ -2,15 +2,18 @@
 //! previously crashed.
 
 use kvarko_engine::{KvarkoEngine, StateEvaluatingController};
+use kvarko_engine::depth::IterativeDeepeningToDepth;
 
 use kvarko_model::game::Controller;
 use kvarko_model::hash::ZobristHasher;
 use kvarko_model::state::State;
 
-type Kvarko = StateEvaluatingController<KvarkoEngine<ZobristHasher<u64>>>;
+type Kvarko = StateEvaluatingController<
+    KvarkoEngine<ZobristHasher<u64>, IterativeDeepeningToDepth>>;
 
 fn kvarko(depth: u32) -> Kvarko {
-    kvarko_engine::kvarko_engine(depth, None)
+    kvarko_engine::kvarko_engine_with_ttable_bits_and_depth_strategy(
+        IterativeDeepeningToDepth::new(depth), None, 20, 16)
 }
 
 fn assert_does_not_crash(depth: u32, fen: &str) {

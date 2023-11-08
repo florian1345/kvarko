@@ -34,6 +34,7 @@ const EPSILON: f32 = 0.0001;
 #[case::classical_kings_indian("rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/2N2N2/PP3PPP/R1BQKB1R w KQ - 2 6")]
 #[case::open_sicilian("rnbqkb1r/pp2pppp/3p1n2/8/3NP3/2N5/PPP2PPP/R1BQKB1R b KQkq - 2 5")]
 #[case::closed_sicilian("r1bqkbnr/pp1ppp1p/2n3p1/2p5/4P3/2N3P1/PPPP1P1P/R1BQKBNR w KQkq - 0 4")]
+#[case::wirtual_opening("rnbqk2r/ppp2ppp/3b1n2/3pp3/1P5P/2P1P1P1/P2P1P2/RNBQKBNR b KQkq - 0 5")]
 #[case::middlegame_1("r6r/1ppk1p2/3pb1p1/p1b4p/P1P2R2/3B4/1PPB1PPP/R5K1 w - - 1 19")]
 #[case::middlegame_2("r3r3/3k1p2/1pppb1p1/7p/PpP2R1P/1P1B4/2P2PP1/4RK2 b - - 1 26")]
 #[case::middlegame_3("rnq1k2r/pp1b2pp/4p3/2p3B1/2B5/1Q6/P4PPP/1R3RK1 b kq - 0 15")]

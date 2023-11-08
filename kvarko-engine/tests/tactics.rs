@@ -1,5 +1,5 @@
 use kvarko_engine::{KvarkoEngine, StateEvaluatingController};
-
+use kvarko_engine::depth::IterativeDeepeningToDepth;
 use kvarko_model::board::Bitboard;
 use kvarko_model::game::Controller;
 use kvarko_model::hash::ZobristHasher;
@@ -7,14 +7,18 @@ use kvarko_model::movement::Move;
 use kvarko_model::piece::Piece;
 use kvarko_model::state::State;
 
-type Kvarko = StateEvaluatingController<KvarkoEngine<ZobristHasher<u64>>>;
+type Kvarko = StateEvaluatingController<
+    KvarkoEngine<
+        ZobristHasher<u64>,
+        IterativeDeepeningToDepth>>;
 
-fn kvarko(depth: u32) -> Kvarko {
-    kvarko_engine::kvarko_engine(depth, None)
+fn kvarko_with_depth(depth: u32) -> Kvarko {
+    kvarko_engine::kvarko_engine_with_ttable_bits_and_depth_strategy(
+        IterativeDeepeningToDepth::new(depth), None, 20, 16)
 }
 
 fn assert_finds_move(fen: &str, depth: u32, mov: Move) {
-    let mut kvarko = kvarko(depth);
+    let mut kvarko = kvarko_with_depth(depth);
     let state = State::from_fen(fen).unwrap();
     let kvarko_move = kvarko.make_move(&state);
 
@@ -147,7 +151,7 @@ fn capture_defended_piece_with_subsequent_fork() {
     // │   │   │   │   │ R │   │   │   │
     // └───┴───┴───┴───┴───┴───┴───┴───┘
     //
-    // Black can capture the knight on e3 with the bishop. If white atempts to
+    // Black can capture the knight on e3 with the bishop. If white attempts to
     // recapture with the rook, black has a fork with the knight on f1. So,
     // this move wins material.
 
