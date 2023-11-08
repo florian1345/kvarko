@@ -7,12 +7,42 @@ use ggez::event::{EventHandler, MouseButton};
 use ggez::graphics::{self, Color, Drawable, DrawParam, Rect};
 
 use kvarko_engine::book::OpeningBook;
-
 use kvarko_model::game::GameBuilder;
 use kvarko_model::state::State;
 
-use crate::state::{GameplayState, GameState, Transition, DynGameState};
-use crate::ui::{Button, Label, Ui, Alignment, AxisAlignment};
+use crate::state::{DynGameState, GameplayState, GameState, Transition};
+use crate::ui::{Alignment, AxisAlignment, Button, Label, Ui};
+
+const DEEPEN_FOR_MAP: [(Duration, &str); 11] = [
+    (Duration::from_millis(200), "200 ms"),
+    (Duration::from_millis(300), "300 ms"),
+    (Duration::from_millis(500), "500 ms"),
+    (Duration::from_millis(700), "700 ms"),
+    (Duration::from_secs(1), "1 s"),
+    (Duration::from_millis(1500), "1.5 s"),
+    (Duration::from_secs(2), "2 s"),
+    (Duration::from_secs(3), "3 s"),
+    (Duration::from_secs(5), "5 s"),
+    (Duration::from_secs(7), "7 s"),
+    (Duration::from_secs(10), "10 s")
+];
+
+fn get_next_deepen_for(current_deepen_for: Duration) -> Duration {
+    let index = DEEPEN_FOR_MAP.iter()
+        .map(|(deepen_for, _)| deepen_for)
+        .enumerate()
+        .find(|(_, &deepen_for)| deepen_for == current_deepen_for)
+        .unwrap().0;
+    let next_index = (index + 1) % DEEPEN_FOR_MAP.len();
+
+    DEEPEN_FOR_MAP[next_index].0
+}
+
+fn get_deepen_for_label(deepen_for: Duration) -> String {
+    DEEPEN_FOR_MAP.iter()
+        .find(|(map_deepen_for, _)| map_deepen_for == &deepen_for)
+        .unwrap().1.to_owned()
+}
 
 #[derive(Clone)]
 struct GameSettings {
@@ -30,10 +60,11 @@ pub struct MenuState {
 impl MenuState {
     pub fn new(ctx: &Context) -> MenuState {
         let screen = graphics::screen_coordinates(ctx);
+        let default_deepen_for = Duration::from_secs(3);
         let mut ui = Ui::new(GameSettings {
             white_kvarko: false,
             black_kvarko: true,
-            deepen_for: Duration::from_secs(5),
+            deepen_for: default_deepen_for,
             use_opening_book: true,
             start: false
         });
@@ -101,7 +132,7 @@ impl MenuState {
                 screen.w * 0.25,
                 screen.h * 0.07),
             Color::WHITE,
-            "Ply depth".to_owned(),
+            "Deepen for".to_owned(),
             Alignment::new(
                 AxisAlignment::Min {
                     margin: 0.0
@@ -110,13 +141,13 @@ impl MenuState {
             ),
             24.0));
 
-        let depth_button = ui.add_element(Button::new(
+        let deepen_for_button = ui.add_element(Button::new(
             Rect::new(
                 screen.w * 0.55,
                 screen.h * 0.45,
                 screen.w * 0.2,
                 screen.h * 0.07
-            ), Color::WHITE, "5 s".to_owned(), 24.0));
+            ), Color::WHITE, get_deepen_for_label(default_deepen_for), 24.0));
 
         ui.add_element(Label::new(
             Rect::new(
@@ -180,12 +211,12 @@ impl MenuState {
                 .set_text(new_text.to_owned());
         });
 
-        ui.set_on_clicked_action(depth_button, move |_, ui, _| {
-            let new_deepen_for_secs = ui.data().deepen_for.as_secs() % 10 + 1;
-            let new_text = format!("{} s", new_deepen_for_secs);
+        ui.set_on_clicked_action(deepen_for_button, move |_, ui, _| {
+            let new_deepen_for = get_next_deepen_for(ui.data().deepen_for);
+            let new_text = get_deepen_for_label(new_deepen_for);
 
-            ui.data_mut().deepen_for = Duration::from_secs(new_deepen_for_secs);
-            ui.element_mut::<Button>(depth_button).set_text(new_text);
+            ui.data_mut().deepen_for = new_deepen_for;
+            ui.element_mut::<Button>(deepen_for_button).set_text(new_text);
         });
 
         ui.set_on_clicked_action(book_button, move |_, ui, _| {
