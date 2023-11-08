@@ -699,9 +699,8 @@ where
         self.ttable.clear();
         let mut value = 0.0;
         let mut mov = None;
-        let mut depth_iterator = self.depth_strategy.depth_iterator();
 
-        while let Some(depth) = depth_iterator.next() {
+        for depth in self.depth_strategy.depth_iterator() {
             let bufs = get_mut_slice_of_len(&mut bufs, depth as usize);
             (value, mov) = self.evaluate_rec(
                 state, bufs, f32::NEG_INFINITY, f32::INFINITY);
