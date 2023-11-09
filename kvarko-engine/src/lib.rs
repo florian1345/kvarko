@@ -11,7 +11,7 @@ use kvarko_model::state::{Position, State};
 use crate::base_evaluator::KvarkoBaseEvaluator;
 
 use crate::book::OpeningBook;
-use crate::depth::{DepthStrategy, IterativeDeepeningForDuration};
+use crate::depth::{Depth, DepthStrategy, IterativeDeepeningForDuration};
 use crate::sort::{CapturePromotionValuePresorter, Presorter};
 use crate::ttable::{
     AlwaysReplace,
@@ -444,7 +444,7 @@ where
 pub struct TreeSearchEvaluatorMetadata {
 
     /// The ply-depth to which was searched. A depth of 0 means all moves were
-    pub depth: usize
+    pub depth: Depth
 }
 
 fn get_mut_slice_of_len<T: Default>(vec: &mut Vec<T>, len: usize) -> &mut [T] {
@@ -471,8 +471,10 @@ where
         self.ttable.clear();
         let mut value = 0.0;
         let mut mov = None;
+        let mut max_depth = 0;
 
         for depth in self.depth_strategy.depth_iterator() {
+            max_depth = max_depth.max(depth);
             let bufs = get_mut_slice_of_len(&mut bufs, depth as usize);
             (value, mov) = self.evaluate_rec(
                 state, bufs, f32::NEG_INFINITY, f32::INFINITY);
@@ -482,7 +484,7 @@ where
             evaluation: value,
             recommended_move: mov.unwrap(),
             metadata: TreeSearchEvaluatorMetadata {
-                depth: bufs.len() - 1
+                depth: max_depth
             }
         }
     }
