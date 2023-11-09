@@ -128,6 +128,14 @@ const PROMOTION_VALUES: [u8; PIECE_COUNT] = [
     QUEEN_KING_CAPTURE_VALUE,
     0
 ];
+const ORDINARY_VALUES: [u8; PIECE_COUNT] = [
+    0,
+    1,
+    1,
+    0,
+    0,
+    0
+];
 // If available usually better than ordinary pawn capture, as the pawn will
 // progress far into enemy territory.
 const EN_PASSANT_VALUE: u8 = MAX_PIECE_CAPTURE_VALUE + 2;
@@ -160,8 +168,8 @@ struct CaptureValue(u8);
 impl CaptureValue {
 
     #[inline]
-    const fn ordinary() -> CaptureValue {
-        CaptureValue(0)
+    const fn ordinary(moved: Piece) -> CaptureValue {
+        CaptureValue(ORDINARY_VALUES[moved as usize])
     }
 
     #[inline]
@@ -188,7 +196,7 @@ impl CaptureValue {
                     CaptureValue::capture(captured, moved)
                 }
                 else {
-                    CaptureValue::ordinary()
+                    CaptureValue::ordinary(moved)
                 },
             Move::EnPassant { .. } =>
                 CaptureValue(EN_PASSANT_VALUE),
@@ -224,14 +232,20 @@ impl Countable for (CaptureValue, Move) {
     }
 }
 
-/// A [Presorter] which presorts moves by their value as a sum of the following
-/// heuristics.
+/// A [Presorter] which presorts moves by the following rules.
 ///
-/// * The value of the captured material. Higher is better.
-/// * The value of the moved piece. Lower is better, as it exposes less material
-/// to the risk of being captured by a defender.
-/// * In case of a promotion, the value of the piece to which is promoted.
-/// Higher is better.
+/// * Captures are preferred to non-captures.
+///   * Higher captured material is preferred.
+///   * Lower moved material is preferred.
+/// * Promotions add to the value depending on the piece to which the pawn
+/// promotes.
+///   * Queens are preferred.
+///   * Knights follow queens.
+///   * All other pieces have no additional value - a queen should replace them
+/// in most cases.
+/// * En-passant comes slightly before normal pawn-pawn-captures.
+/// * Ordinary moves come last, with minor piece moves being preferred over all
+/// others.
 #[derive(Clone, Debug)]
 pub struct CapturePromotionValuePresorter {
     counter_sort: CounterSort<(CaptureValue, Move)>,
