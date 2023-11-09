@@ -12,7 +12,7 @@ use crate::base_evaluator::KvarkoBaseEvaluator;
 
 use crate::book::OpeningBook;
 use crate::depth::{DepthStrategy, IterativeDeepeningForDuration};
-use crate::sort::{CaptureValuePresorter, Presorter};
+use crate::sort::{CapturePromotionValuePresorter, Presorter};
 use crate::ttable::{
     AlwaysReplace,
     DepthAndBound,
@@ -526,9 +526,9 @@ type KvarkoEvaluator<H, D> = TreeSearchEvaluator<
         H,
         KvarkoBaseEvaluator,
         ListNonPawnCapturesIn,
-        CaptureValuePresorter
+        CapturePromotionValuePresorter
     >,
-    CaptureValuePresorter,
+    CapturePromotionValuePresorter,
     D>;
 
 /// Metadata provided by the [KvarkoEngine].
@@ -665,10 +665,10 @@ where
             QuiescenseTreeSearchEvaluator::new(
                 KvarkoBaseEvaluator::default(),
                 ListNonPawnCapturesIn,
-                CaptureValuePresorter::new(),
+                CapturePromotionValuePresorter::new(),
                 quiescence_search_ttable_bits
             ),
-            CaptureValuePresorter::new(),
+            CapturePromotionValuePresorter::new(),
             depth_strategy,
             tree_search_ttable_bits
         )

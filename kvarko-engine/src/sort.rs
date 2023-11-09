@@ -224,22 +224,32 @@ impl Countable for (CaptureValue, Move) {
     }
 }
 
+/// A [Presorter] which presorts moves by their value as a sum of the following
+/// heuristics.
+///
+/// * The value of the captured material. Higher is better.
+/// * The value of the moved piece. Lower is better, as it exposes less material
+/// to the risk of being captured by a defender.
+/// * In case of a promotion, the value of the piece to which is promoted.
+/// Higher is better.
 #[derive(Clone, Debug)]
-pub struct CaptureValuePresorter {
+pub struct CapturePromotionValuePresorter {
     counter_sort: CounterSort<(CaptureValue, Move)>,
     in_buf: Box<[(CaptureValue, Move); LEN_UPPER_BOUND]>
 }
 
-impl CaptureValuePresorter {
-    pub fn new() -> CaptureValuePresorter {
-        CaptureValuePresorter {
+impl CapturePromotionValuePresorter {
+
+    /// Creates a new capture-promotion-value pre-sorter with default values.
+    pub fn new() -> CapturePromotionValuePresorter {
+        CapturePromotionValuePresorter {
             counter_sort: CounterSort::new(),
             in_buf: Box::new([(CaptureValue(0), NULL_MOVE); LEN_UPPER_BOUND])
         }
     }
 }
 
-impl Presorter for CaptureValuePresorter {
+impl Presorter for CapturePromotionValuePresorter {
     fn pre_sort(&mut self, moves: &mut [Move], _: &Position) {
         let len = moves.len();
 
@@ -256,8 +266,8 @@ impl Presorter for CaptureValuePresorter {
     }
 }
 
-impl Default for CaptureValuePresorter {
-    fn default() -> CaptureValuePresorter {
-        CaptureValuePresorter::new()
+impl Default for CapturePromotionValuePresorter {
+    fn default() -> CapturePromotionValuePresorter {
+        CapturePromotionValuePresorter::new()
     }
 }
