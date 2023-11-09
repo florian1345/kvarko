@@ -5,8 +5,10 @@ use kvarko_model::piece::Piece;
 use kvarko_model::player::Player;
 use kvarko_model::state::{Position, State};
 
-/// Similar to [StateEvaluator], however accepts additional parameters that are
-/// provided by the [TreeSearchEvaluator] or [QuiescenseTreeSearchEvaluator],
+/// Similar to [StateEvaluator](crate::StateEvaluator), however accepts
+/// additional parameters that are rovided by the
+/// [TreeSearchEvaluator](crate::TreeSearchEvaluator) or
+/// [QuiescenseTreeSearchEvaluator](crate::QuiescenseTreeSearchEvaluator),
 /// which can be used to improve performance.
 pub trait BaseEvaluator<H: PositionHasher> {
 
