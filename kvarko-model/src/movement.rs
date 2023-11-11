@@ -2,6 +2,8 @@
 //! can make in a given position. It also contains a move generation algorithm
 //! accessible through the function [list_moves].
 
+use std::fmt::{self, Display, Formatter};
+
 use serde::{Deserialize, Serialize};
 
 use std::iter::Peekable;
@@ -76,12 +78,94 @@ enum AlgebraicMove {
         src_rank: Option<usize>,
         dest: Location,
         captures: bool,
-        // check: bool,
-        // mate: bool,
+        check: bool,
+        mate: bool,
         promotion: Option<Piece>
     },
     Castle {
-        long: bool
+        long: bool,
+        check: bool,
+        mate: bool
+    }
+}
+
+fn fmt_piece(piece: Piece, f: &mut Formatter) -> fmt::Result {
+    match piece {
+        Piece::Pawn => Ok(()),
+        Piece::Knight => write!(f, "N"),
+        Piece::Bishop => write!(f, "B"),
+        Piece::Rook => write!(f, "R"),
+        Piece::Queen => write!(f, "Q"),
+        Piece::King => write!(f, "K")
+    }
+}
+
+fn fmt_file(file: usize, f: &mut Formatter) -> fmt::Result {
+    let file_char = char::from_u32('a' as u32 + file as u32).unwrap();
+    write!(f, "{}", file_char)
+}
+
+fn fmt_rank(rank: usize, f: &mut Formatter) -> fmt::Result {
+    write!(f, "{}", rank + 1)
+}
+
+impl Display for AlgebraicMove {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let (check, mate) = match self {
+            &AlgebraicMove::Ordinary {
+                moved,
+                src_file,
+                src_rank,
+                dest,
+                captures,
+                check,
+                mate,
+                promotion
+            } => {
+                fmt_piece(moved, f)?;
+
+                if let Some(src_file) = src_file {
+                    fmt_file(src_file, f)?;
+                }
+
+                if let Some(src_rank) = src_rank {
+                    fmt_rank(src_rank, f)?;
+                }
+
+                if captures {
+                    write!(f, "x")?;
+                }
+
+                fmt_file(dest.file(), f)?;
+                fmt_rank(dest.rank(), f)?;
+
+                if let Some(promotion) = promotion {
+                    write!(f, "=")?;
+                    fmt_piece(promotion, f)?;
+                }
+
+                (check, mate)
+            },
+            &AlgebraicMove::Castle { long, check, mate } => {
+                if long {
+                    write!(f, "O-O-O")?;
+                }
+                else {
+                    write!(f, "O-O")?;
+                }
+
+                (check, mate)
+            }
+        };
+
+        if mate {
+            write!(f, "#")?;
+        }
+        else if check {
+            write!(f, "+")?;
+        }
+
+        Ok(())
     }
 }
 
@@ -118,13 +202,17 @@ impl AlgebraicMove {
     fn parse(algebraic: &str) -> AlgebraicResult<AlgebraicMove> {
         if algebraic == "O-O" || algebraic == "O-O+" || algebraic == "O-O#" {
             return Ok(AlgebraicMove::Castle {
-                long: false
+                long: false,
+                check: algebraic.ends_with('+'),
+                mate: algebraic.ends_with('#')
             });
         }
         else if algebraic == "O-O-O" || algebraic == "O-O-O+" ||
                 algebraic == "O-O-O#" {
             return Ok(AlgebraicMove::Castle {
-                long: true
+                long: true,
+                check: algebraic.ends_with('+'),
+                mate: algebraic.ends_with('#')
             });
         }
 
@@ -188,15 +276,15 @@ impl AlgebraicMove {
             });
         }
 
-        // let mut check = false;
-        // let mut mate = false;
+        let mut check = false;
+        let mut mate = false;
 
         match chars.next() {
             Some('+') => {
-                // check = true;
+                check = true;
             },
             Some('#') => {
-                // mate = true;
+                mate = true;
             },
             Some(c) => {
                 return Err(AlgebraicError::InvalidSuffix(c));
@@ -219,8 +307,8 @@ impl AlgebraicMove {
             dest: Location::from_file_and_rank(
                 dest_file.unwrap(), dest_rank.unwrap()).unwrap(),
             captures,
-            // check,
-            // mate,
+            check,
+            mate,
             promotion
         })
     }
@@ -243,9 +331,9 @@ pub enum Move {
         /// The type of [Piece] that was moved.
         moved: Piece,
 
-        /// [Option::Some] containing the type of [Piece] that was captured if
-        /// the move is a capture, and [Option::None] otherwise. This is mainly
-        /// used for revertability reasons.
+        /// [Some] containing the type of [Piece] that was captured if the move
+        /// is a capture, and [None] otherwise. This is mainly used for
+        /// revertability reasons.
         captured: Option<Piece>,
 
         /// A [Bitboard] which contains both the source and destination square
@@ -284,6 +372,75 @@ pub enum Move {
     Castle {
         king_delta_mask: Bitboard,
         rook_delta_mask: Bitboard
+    }
+}
+
+fn castle_king_delta_mask_to_algebraic_move(king_delta_mask: Bitboard,
+        check: bool, mate: bool) -> Option<AlgebraicMove> {
+    let long = White::LONG_CASTLE_INFO.king_delta_mask == king_delta_mask ||
+        Black::LONG_CASTLE_INFO.king_delta_mask == king_delta_mask;
+    let short = White::SHORT_CASTLE_INFO.king_delta_mask == king_delta_mask ||
+        Black::SHORT_CASTLE_INFO.king_delta_mask == king_delta_mask;
+
+    if !(long || short) {
+        return None;
+    }
+
+    return Some(AlgebraicMove::Castle {
+        long,
+        check,
+        mate
+    })
+}
+
+struct ListMovesPieceIntersecting {
+    list: Vec<Move>,
+    bitboard: Bitboard,
+    piece: Piece
+}
+
+impl ListMovesPieceIntersecting {
+    fn new(bitboard: Bitboard, piece: Piece) -> ListMovesPieceIntersecting {
+        ListMovesPieceIntersecting {
+            list: Vec::new(),
+            bitboard,
+            piece
+        }
+    }
+
+    fn into_moves(self) -> Vec<Move> {
+        self.list
+    }
+}
+
+impl MoveProcessor for ListMovesPieceIntersecting {
+    fn process(&mut self, mov: Move) {
+        if !(mov.delta_mask() & self.bitboard).is_empty() &&
+                mov.moved_piece() == self.piece {
+            self.list.push(mov);
+        }
+    }
+}
+
+struct HasMoves {
+    has_moves: bool
+}
+
+impl HasMoves {
+    fn new() -> HasMoves {
+        HasMoves {
+            has_moves: false
+        }
+    }
+
+    fn has_moves(self) -> bool {
+        self.has_moves
+    }
+}
+
+impl MoveProcessor for HasMoves {
+    fn process(&mut self, _: Move) {
+        self.has_moves = true;
     }
 }
 
@@ -352,7 +509,8 @@ impl Move {
                         src_rank,
                         dest,
                         captures,
-                        promotion
+                        promotion,
+                        ..
                     } => {
                         let delta_mask = mov.delta_mask();
                         let mov_src = (delta_mask & own_pieces).min_unchecked();
@@ -391,7 +549,7 @@ impl Move {
                         board.piece_at(mov_src) == Some(moved) &&
                             mov_dest == dest && mov_cap == captures
                     },
-                    AlgebraicMove::Castle { long } => {
+                    AlgebraicMove::Castle { long, .. } => {
                         match mov {
                             &Move::Castle { king_delta_mask, .. } => {
                                 (king_delta_mask ==
@@ -403,6 +561,80 @@ impl Move {
                 }
             })
             .ok_or(AlgebraicError::NoSuchMove)
+    }
+
+    /// Converts this move to its algebraic notation, if possible. See
+    /// [Move::parse_algebraic] for a detailed description of algebraic
+    /// notation.
+    ///
+    /// # Arguments
+    ///
+    /// * `position`: The [Position] in which the move is made. Required to
+    /// decide which piece was made.
+    ///
+    /// # Returns
+    ///
+    /// `Some(_)` with the algebraic notation if this move is a valid move in
+    /// the position, otherwise `None`.
+    pub fn to_algebraic(&self, position: &Position) -> Option<String> {
+        self.to_algebraic_move(position).map(|mov| mov.to_string())
+    }
+
+    fn get_src_collisions(&self, position: &Position, piece: Piece)
+            -> Bitboard {
+        let mut move_processor =
+            ListMovesPieceIntersecting::new(self.delta_mask(), piece);
+        process_moves(position, &mut move_processor);
+        return move_processor
+            .into_moves()
+            .into_iter()
+            .map(|mov| Bitboard::singleton(mov.source(position).unwrap()))
+            .reduce(|singleton_1, singleton_2| singleton_1 |singleton_2)
+            .unwrap();
+    }
+
+    fn to_algebraic_move(&self, position: &Position) -> Option<AlgebraicMove> {
+        let mut advanced_position = position.clone();
+        advanced_position.make_move(self);
+        let mut has_moves_processor = HasMoves::new();
+        let check = process_moves(&advanced_position, &mut has_moves_processor);
+        let mate = check && !has_moves_processor.has_moves();
+
+        if let &Move::Castle { king_delta_mask, .. } = self {
+            return castle_king_delta_mask_to_algebraic_move(king_delta_mask, check, mate);
+        }
+
+        let dest = self.destination(position).expect("no dest location found");
+        let moved = self.moved_piece();
+        let captures = self.captured_piece().is_some();
+        let promotion = self.promotion();
+
+        let src = self.source(position)?;
+        let src_collisions = self.get_src_collisions(position, moved);
+        let src_unique = src_collisions.len() == 1;
+        let src_file_unique = src_collisions.locations()
+            .filter(|potential_src| potential_src.file() == src.file())
+            .count() == 1;
+        let src_rank_unique = src_collisions.locations()
+            .filter(|potential_src| potential_src.rank() == src.rank())
+            .count() == 1;
+        let use_src_file =
+            !src_unique && (src_file_unique || !src_rank_unique) ||
+                captures && moved == Piece::Pawn;
+        let use_src_rank = !src_file_unique;
+        let src_file = if use_src_file { Some(src.file()) } else { None };
+        let src_rank = if use_src_rank { Some(src.rank()) } else { None };
+
+        Some(AlgebraicMove::Ordinary {
+            moved,
+            src_file,
+            src_rank,
+            dest,
+            captures,
+            check,
+            mate,
+            promotion
+        })
     }
 
     fn delta_mask(&self) -> Bitboard {
@@ -453,6 +685,38 @@ impl Move {
     /// squares are occupied, an unspecified one of them is returned.
     pub fn destination(&self, position: &Position) -> Option<Location> {
         (self.delta_mask() - position.board().of_player(position.turn())).min()
+    }
+
+    /// Gets the kind of [Piece] which is moved by this move. For castling, this
+    /// counts as the [Piece::King].
+    pub fn moved_piece(&self) -> Piece {
+        match self {
+            &Move::Ordinary { moved, .. } => moved,
+            Move::EnPassant { .. } | Move::Promotion { .. } => Piece::Pawn,
+            Move::Castle { .. } => Piece::King
+        }
+    }
+
+    /// Gets the kind of [Piece] which was captured in this move or `None` if no
+    /// capture was made. For en-passant, this is always [Piece::Pawn].
+    pub fn captured_piece(&self) -> Option<Piece> {
+        match self {
+            &Move::Ordinary { captured, .. } |
+                &Move::Promotion { captured, .. } => captured,
+            Move::EnPassant { .. } => Some(Piece::Pawn),
+            Move::Castle { .. } => None
+        }
+    }
+
+    /// Gets the kind of [Piece] to which the moved pawn is promoted or `None`
+    /// if the move is not a promotion.
+    pub fn promotion(&self) -> Option<Piece> {
+        if let &Move::Promotion { promotion, .. } = self {
+            Some(promotion)
+        }
+        else {
+            None
+        }
     }
 
     pub fn to_coordinate_notation(&self, position: &Position) -> Option<String> {
@@ -1250,6 +1514,9 @@ mod tests {
 
     use crate::hash::IdHasher;
     use crate::state::State;
+
+    use kernal::prelude::*;
+    use rstest::rstest;
 
     use super::*;
 
@@ -3240,5 +3507,224 @@ mod tests {
         ];
 
         assert_set_equals(expected_moves, moves_from_b6);
+    }
+
+    #[rstest]
+    #[case::ordinary_pawn_move(
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -",
+        Move::Ordinary {
+            moved: Piece::Pawn,
+            captured: None,
+            delta_mask: Bitboard(0x0000000010001000)
+        }, "e4"
+    )]
+    #[case::pawn_capture(
+        "rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq -",
+        Move::Ordinary {
+            moved: Piece::Pawn,
+            captured: Some(Piece::Pawn),
+            delta_mask: Bitboard(0x0000000810000000)
+        }, "exd5"
+    )]
+    #[case::pawn_capture_with_check(
+        "rnbqkbnr/ppp2ppp/8/3p4/3pP3/8/PPP1QPPP/RNB1KBNR w KQkq -",
+        Move::Ordinary {
+            moved: Piece::Pawn,
+            captured: Some(Piece::Pawn),
+            delta_mask: Bitboard(0x0000000810000000)
+        }, "exd5+"
+    )]
+    #[case::pawn_checkmate(
+        "8/8/8/8/5pk1/6P1/5PKP/r7 b - -",
+        Move::Ordinary {
+            moved: Piece::Pawn,
+            captured: None,
+            delta_mask: Bitboard(0x0000000020200000)
+        }, "f3#"
+    )]
+    #[case::promotion_no_capture(
+        "8/8/8/8/6Q1/3nK3/1kp5/8 b - -",
+        Move::Promotion {
+            captured: None,
+            promotion: Piece::Rook,
+            delta_mask: Bitboard(0x0000000000000404)
+        }, "c1=R"
+    )]
+    #[case::promotion_with_capture_and_check(
+        "4b1k1/3P1pp1/7p/2N5/8/7P/5PPK/1r6 w - -",
+        Move::Promotion {
+            captured: Some(Piece::Bishop),
+            promotion: Piece::Queen,
+            delta_mask: Bitboard(0x1008000000000000)
+        }, "dxe8=Q+"
+    )]
+    #[case::en_passant(
+        "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6",
+        Move::EnPassant {
+            delta_mask: Bitboard(0x0000201000000000),
+            target: Bitboard(0x0000002000000000)
+        }, "exf6"
+    )]
+    #[case::en_passant_check(
+        "8/8/8/6k1/K1pP3r/8/8/8 b - d3",
+        Move::EnPassant {
+            delta_mask: Bitboard(0x0000000004080000),
+            target: Bitboard(0x0000000008000000)
+        }, "cxd3+"
+    )]
+    #[case::en_passant_mate(
+        "1R6/7k/8/5NpP/8/8/6R1/6K1 w - g6",
+        Move::EnPassant {
+            delta_mask: Bitboard(0x0000408000000000),
+            target: Bitboard(0x0000004000000000)
+        }, "hxg6#"
+    )]
+    #[case::ordinary_knight_move(
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -",
+        Move::Ordinary {
+            moved: Piece::Knight,
+            captured: None,
+            delta_mask: Bitboard(0x0000000000040002)
+        }, "Nc3"
+    )]
+    #[case::knight_move_with_source_file_and_rank(
+        "k7/8/2n1n3/8/8/8/2n5/7K b - -",
+        Move::Ordinary {
+            moved: Piece::Knight,
+            captured: None,
+            delta_mask: Bitboard(0x0000040008000000)
+        }, "Nc6d4"
+    )]
+    #[case::knight_capture_and_check(
+        "r1b1kbnr/ppppqppp/2n5/1N2p3/4P3/8/PPPP1PPP/R1BQKBNR w KQkq -",
+        Move::Ordinary {
+            moved: Piece::Knight,
+            captured: Some(Piece::Pawn),
+            delta_mask: Bitboard(0x0004000200000000)
+        }, "Nxc7+"
+    )]
+    #[case::ordinary_bishop_move(
+        "rnbqkbnr/pppp1ppp/8/4p3/2B1P3/8/PPPP1PPP/RNBQK1NR b KQkq -",
+        Move::Ordinary {
+            moved: Piece::Bishop,
+            captured: None,
+            delta_mask: Bitboard(0x2000000400000000)
+        }, "Bc5"
+    )]
+    #[case::bishop_check(
+        "rnbqkb1r/pppp1ppp/5n2/4P3/2B5/8/PB3PPP/RN1QK1NR b KQkq -",
+        Move::Ordinary {
+            moved: Piece::Bishop,
+            captured: None,
+            delta_mask: Bitboard(0x2000000002000000)
+        }, "Bb4+"
+    )]
+    #[case::bishop_capture_and_mate(
+        "rnbqk2r/pppp1p2/7p/4P1p1/2B1nQ2/B7/P4PPP/R3K1NR w KQkq -",
+        Move::Ordinary {
+            moved: Piece::Bishop,
+            captured: Some(Piece::Pawn),
+            delta_mask: Bitboard(0x0020000004000000)
+        }, "Bxf7#"
+    )]
+    #[case::ordinary_rook_move(
+        "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQ1RK1 w kq -",
+        Move::Ordinary {
+            moved: Piece::Rook,
+            captured: None,
+            delta_mask: Bitboard(0x0000000000000030)
+        }, "Re1"
+    )]
+    #[case::rook_with_source_file_and_check(
+        "r4rk1/5ppp/p7/8/8/P1P2N2/1P3PPP/4K2R b - -",
+        Move::Ordinary {
+            moved: Piece::Rook,
+            captured: None,
+            delta_mask: Bitboard(0x3000000000000000)
+        }, "Rfe8+"
+    )]
+    #[case::rook_capture_with_source_rank(
+        "4r1k1/5ppp/p7/4N3/8/P1P3B1/1P2rPPP/5RK1 b - -",
+        Move::Ordinary {
+            moved: Piece::Rook,
+            captured: Some(Piece::Knight),
+            delta_mask: Bitboard(0x0000001000001000)
+        }, "R2xe5"
+    )]
+    #[case::ordinary_queen_move(
+        "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq -",
+        Move::Ordinary {
+            moved: Piece::Queen,
+            captured: None,
+            delta_mask: Bitboard(0x0000008000000008)
+        }, "Qh5"
+    )]
+    #[case::queen_with_source_file_where_rank_would_also_have_sufficed(
+        "8/8/7k/8/8/5Q2/6Q1/4K3 w - -",
+        Move::Ordinary {
+            moved: Piece::Queen,
+            captured: None,
+            delta_mask: Bitboard(0x0000000000a00000)
+        }, "Qfh3#"
+    )]
+    #[case::queen_move_with_maximal_parts(
+        "4k3/3q2q1/8/8/3q2R1/7K/8/8 b - -",
+        Move::Ordinary {
+            moved: Piece::Queen,
+            captured: Some(Piece::Rook),
+            delta_mask: Bitboard(0x0008000040000000)
+        }, "Qd7xg4+"
+    )]
+    #[case::ordinary_king_move(
+        "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq -",
+        Move::Ordinary {
+            moved: Piece::King,
+            captured: None,
+            delta_mask: Bitboard(0x0000000000001010)
+        }, "Ke2"
+    )]
+    #[case::king_capture_and_mate(
+        "K5kr/Rn3N2/8/2n5/8/8/8/8 b - - 0 1",
+        Move::Ordinary {
+            moved: Piece::King,
+            captured: Some(Piece::Knight),
+            delta_mask: Bitboard(0x4020000000000000)
+        }, "Kxf7#"
+    )]
+    #[case::white_short_castle(
+        "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq -",
+        Move::Castle {
+            king_delta_mask: Bitboard(0x0000000000000050),
+            rook_delta_mask: Bitboard(0x00000000000000a0)
+        }, "O-O"
+    )]
+    #[case::black_long_castle(
+        "r3kbnr/ppp2ppp/2np1q2/4p3/2B1P1b1/2NP1N2/PPP2PPP/R1BQ1RK1 b kq -",
+        Move::Castle {
+            king_delta_mask: Bitboard(0x1400000000000000),
+            rook_delta_mask: Bitboard(0x0900000000000000)
+        }, "O-O-O"
+    )]
+    #[case::white_long_castle_check(
+        "3k4/8/8/8/8/8/8/R3K3 w Q -",
+        Move::Castle {
+            king_delta_mask: Bitboard(0x0000000000000014),
+            rook_delta_mask: Bitboard(0x0000000000000009)
+        }, "O-O-O+"
+    )]
+    #[case::black_short_castle_mate(
+        "4k2r/4r3/2b5/8/8/7n/8/5K2 b - -",
+        Move::Castle {
+            king_delta_mask: Bitboard(0x5000000000000000),
+            rook_delta_mask: Bitboard(0xa000000000000000)
+        }, "O-O#"
+    )]
+    fn to_algebraic_notation_works(#[case] fen: &str, #[case] mov: Move,
+            #[case] expected: &str) {
+        let position = Position::from_fen(fen).unwrap();
+
+        let algebraic = mov.to_algebraic(&position);
+
+        assert_that!(algebraic).contains(expected.to_owned());
     }
 }
