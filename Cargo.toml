@@ -3,6 +3,7 @@
 members = [
     "kvarko-cli",
     "kvarko-engine",
+    "kvarko-lichess-bot",
     "kvarko-model",
     "kvarko-proc-macro",
     "kvarko-view"
