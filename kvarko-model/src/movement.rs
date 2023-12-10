@@ -111,8 +111,8 @@ fn fmt_rank(rank: usize, f: &mut Formatter) -> fmt::Result {
 
 impl Display for AlgebraicMove {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let (check, mate) = match self {
-            &AlgebraicMove::Ordinary {
+        let (check, mate) = match *self {
+            AlgebraicMove::Ordinary {
                 moved,
                 src_file,
                 src_rank,
@@ -146,7 +146,7 @@ impl Display for AlgebraicMove {
 
                 (check, mate)
             },
-            &AlgebraicMove::Castle { long, check, mate } => {
+            AlgebraicMove::Castle { long, check, mate } => {
                 if long {
                     write!(f, "O-O-O")?;
                 }
@@ -576,7 +576,7 @@ impl Move {
     ///
     /// `Some(_)` with the algebraic notation if this move is a valid move in
     /// the position, otherwise `None`.
-    pub fn to_algebraic(&self, position: &Position) -> Option<String> {
+    pub fn to_algebraic(self, position: &Position) -> Option<String> {
         self.to_algebraic_move(position).map(|mov| mov.to_string())
     }
 
@@ -593,14 +593,14 @@ impl Move {
             .unwrap();
     }
 
-    fn to_algebraic_move(&self, position: &Position) -> Option<AlgebraicMove> {
+    fn to_algebraic_move(self, position: &Position) -> Option<AlgebraicMove> {
         let mut advanced_position = position.clone();
-        advanced_position.make_move(self);
+        advanced_position.make_move(&self);
         let mut has_moves_processor = HasMoves::new();
         let check = process_moves(&advanced_position, &mut has_moves_processor);
         let mate = check && !has_moves_processor.has_moves();
 
-        if let &Move::Castle { king_delta_mask, .. } = self {
+        if let Move::Castle { king_delta_mask, .. } = self {
             return castle_king_delta_mask_to_algebraic_move(king_delta_mask, check, mate);
         }
 
