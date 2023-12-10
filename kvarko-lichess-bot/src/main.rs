@@ -30,7 +30,7 @@ impl Bot for LoggingBot {
 
 #[tokio::main]
 async fn main() {
-    let token = env::args().skip(1).next().expect("provide an API token as a CLI argument");
+    let token = env::args().nth(1).expect("provide an API token as a CLI argument");
     let client = BotClientBuilder::new()
         .with_token(token)
         .build().unwrap();

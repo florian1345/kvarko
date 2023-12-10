@@ -386,7 +386,7 @@ fn castle_king_delta_mask_to_algebraic_move(king_delta_mask: Bitboard,
         return None;
     }
 
-    return Some(AlgebraicMove::Castle {
+    Some(AlgebraicMove::Castle {
         long,
         check,
         mate
@@ -585,12 +585,12 @@ impl Move {
         let mut move_processor =
             ListMovesPieceIntersecting::new(self.delta_mask(), piece);
         process_moves(position, &mut move_processor);
-        return move_processor
+        move_processor
             .into_moves()
             .into_iter()
             .map(|mov| Bitboard::singleton(mov.source(position).unwrap()))
             .reduce(|singleton_1, singleton_2| singleton_1 |singleton_2)
-            .unwrap();
+            .unwrap()
     }
 
     fn to_algebraic_move(self, position: &Position) -> Option<AlgebraicMove> {
