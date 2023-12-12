@@ -31,7 +31,7 @@ where
 
             assert_eq!(hash, state.position_hash(),
                 "Error at state `{}` move `{}`.", state.to_fen(),
-                mov.to_coordinate_notation(state.position()).unwrap());
+                mov.to_uci_notation(state.position()).unwrap());
         }
 
         hash

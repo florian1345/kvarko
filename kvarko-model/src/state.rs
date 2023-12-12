@@ -852,6 +852,22 @@ impl<H: PositionHasher> State<H> {
         Ok(state)
     }
 
+    pub fn from_uci_history<S, I>(history: I) -> Option<State<H>>
+    where
+        S: AsRef<str>,
+        I: Iterator<Item = S>
+    {
+        // TODO reduce code duplication with from_algebraic_history
+        let mut state = State::initial();
+
+        for algebraic in history {
+            let mov = Move::parse_uci(state.position(), algebraic.as_ref())?;
+            state.make_move(&mov);
+        }
+
+        Some(state)
+    }
+
     /// Gets the current [Position].
     ///
     /// # Returns

@@ -58,7 +58,7 @@ fn evaluate_with_kvarko(state: &mut State<ZobristHasher<u64>>, deepen_for: Durat
 
 fn log_eval_result(position: &Position, output: StateEvaluatorOutput<KvarkoEngineMetadata>,
         runtime: Duration) {
-    let recommended_move_str = output.recommended_move.to_coordinate_notation(position).unwrap();
+    let recommended_move_str = output.recommended_move.to_uci_notation(position).unwrap();
 
     println!("Evaluation: {}", output.evaluation);
     println!("Recommended move: {}", recommended_move_str);

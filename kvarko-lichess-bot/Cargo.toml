@@ -7,5 +7,7 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1"
+kvarko-engine = { path = "../kvarko-engine" }
+kvarko-model = { path = "../kvarko-model" }
 libot = { git = "https://github.com/florian1345/libot" }
 tokio = { version = "1", features = [ "full" ] }
