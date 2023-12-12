@@ -563,6 +563,12 @@ impl Move {
             .ok_or(AlgebraicError::NoSuchMove)
     }
 
+    pub fn parse_uci(position: &Position, uci: &str) -> Option<Move> {
+        // TODO parse faster
+        list_moves(position).0.into_iter()
+            .find(|mov| mov.to_uci_notation(position).unwrap().as_str() == uci)
+    }
+
     /// Converts this move to its algebraic notation, if possible. See
     /// [Move::parse_algebraic] for a detailed description of algebraic
     /// notation.
@@ -719,7 +725,7 @@ impl Move {
         }
     }
 
-    pub fn to_coordinate_notation(&self, position: &Position) -> Option<String> {
+    pub fn to_uci_notation(&self, position: &Position) -> Option<String> {
         let source = self.source(position)?;
         let destionation = self.destination(position)?;
         let mut bytes = vec![
