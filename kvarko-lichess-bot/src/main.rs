@@ -6,28 +6,48 @@ use libot::client::{BotClient, BotClientBuilder};
 use libot::model::{
     ChallengeDeclinedEvent,
     ChallengeEvent,
-    ChatLineEvent,
+    Color,
     DeclineReason,
-    GameFullEvent,
-    GameId,
+    GameContext,
     GameStartFinishEvent,
     GameStateEvent,
-    OpponentGoneEvent
+    Milliseconds
 };
-use kvarko_engine::depth::IterativeDeepeningForDuration;
 
 use kvarko_engine::{KvarkoEngine, StateEvaluatingController, StateEvaluator};
+use kvarko_engine::depth::IterativeDeepeningForDuration;
 
 use kvarko_model::hash::ZobristHasher;
+use kvarko_model::player::Player;
 use kvarko_model::state::State;
-
-const DEEPEN_FOR: Duration = Duration::from_secs(1);
 
 type Kvarko = StateEvaluatingController<
     KvarkoEngine<ZobristHasher<u64>, IterativeDeepeningForDuration>>;
 
-fn kvarko_engine() -> Kvarko {
-    kvarko_engine::kvarko_engine(DEEPEN_FOR, None)
+fn kvarko_engine(deepen_for: Duration) -> Kvarko {
+    kvarko_engine::kvarko_engine(deepen_for, None)
+}
+
+const MIN_FROM_TOTAL: f64 = 0.005;
+const MAX_FROM_TOTAL: f64 = 0.05;
+const FROM_INCREMENT: f64 = 0.5;
+const MILLIS_TO_SECS: f64 = 0.001;
+
+fn compute_deepen_for(total: Milliseconds, increment: Milliseconds) -> Duration {
+    let min_from_total = total as f64 * MIN_FROM_TOTAL;
+    let max_from_total = total as f64 * MAX_FROM_TOTAL;
+    let from_increment = increment as f64 * FROM_INCREMENT;
+
+    let millis = from_increment.min(max_from_total).max(min_from_total);
+
+    Duration::from_secs_f64(millis * MILLIS_TO_SECS)
+}
+
+fn map_player(player: Player) -> Color {
+    match player {
+        Player::White => Color::White,
+        Player::Black => Color::Black
+    }
 }
 
 struct KvarkoBot;
@@ -60,26 +80,36 @@ impl Bot for KvarkoBot {
         println!("Challenge Declined: {:?}", challenge);
     }
 
-    async fn on_game_full(&self, _: GameId, game_full: GameFullEvent, _: &BotClient) {
-        println!("Game Full: {:?}", game_full);
-    }
-
-    async fn on_game_state(&self, game_id: GameId, state: GameStateEvent, client: &BotClient) {
-        if let Some(mut state) = State::from_uci_history(state.moves.split(' ')) {
-            let mut kvarko = kvarko_engine();
-            let output = kvarko.evaluate_state(&mut state);
-            let move_uci = output.recommended_move.to_uci_notation(state.position()).unwrap();
-
-            client.make_move(game_id, move_uci, false).await.unwrap();
+    async fn on_game_state(&self, game_context: &GameContext, state: GameStateEvent,
+            client: &BotClient) {
+        let kvarko_state = if state.moves.is_empty() {
+            Some(State::initial())
         }
-    }
+        else {
+            State::from_uci_history(state.moves.split(' '))
+        };
 
-    async fn on_chat_line(&self, _: GameId, chat_line: ChatLineEvent, _: &BotClient) {
-        println!("Chat Line: {:?}", chat_line);
-    }
+        if let Some(mut kvarko_state) = kvarko_state {
+            let bot_color = game_context.bot_color;
+            let turn = kvarko_state.position().turn();
 
-    async fn on_opponent_gone(&self, _: GameId, opponent_gone: OpponentGoneEvent, _: &BotClient) {
-        println!("Chat Line: {:?}", opponent_gone);
+            if bot_color != Some(map_player(turn)) {
+                return;
+            }
+
+            let (total, increment) = match turn {
+                Player::White => (state.white_time, state.white_increment),
+                Player::Black => (state.black_time, state.black_increment)
+            };
+            let deepen_for = compute_deepen_for(total, increment);
+
+            let mut kvarko = kvarko_engine(deepen_for);
+            let output = kvarko.evaluate_state(&mut kvarko_state);
+            let move_uci =
+                output.recommended_move.to_uci_notation(kvarko_state.position()).unwrap();
+
+            client.make_move(game_context.id.clone(), move_uci, false).await.unwrap();
+        }
     }
 }
 
