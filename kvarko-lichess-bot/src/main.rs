@@ -120,10 +120,9 @@ impl Bot for KvarkoBot {
         };
 
         if let Some(mut kvarko_state) = kvarko_state {
-            let bot_color = game_context.bot_color;
             let turn = kvarko_state.position().turn();
 
-            if bot_color != Some(map_player(turn)) {
+            if game_context.bot_color != Some(map_player(turn)) || !state.status.is_running() {
                 return;
             }
 
@@ -138,7 +137,9 @@ impl Bot for KvarkoBot {
             let move_uci =
                 output.recommended_move.to_uci_notation(kvarko_state.position()).unwrap();
 
-            client.make_move(game_context.id.clone(), move_uci, false).await.unwrap();
+            if let Err(e) = client.make_move(game_context.id.clone(), move_uci, false).await {
+                eprintln!("error sending move: {:?}", e); // TODO proper tracing
+            }
         }
     }
 
