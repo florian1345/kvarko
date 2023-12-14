@@ -148,10 +148,9 @@ impl Bot for KvarkoBot {
             let parts = chat_line.text[1..].split(' ').collect::<Vec<_>>();
             let (&command, args) = parts.split_first().unwrap();
 
-            match command {
+            if command == "time" {
                 // TODO error handling
-                "time" => self.execute_time_command(args, context, client).await.unwrap(),
-                _ => { }
+                self.execute_time_command(args, context, client).await.unwrap();
             }
         }
     }
