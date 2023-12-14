@@ -1,18 +1,11 @@
 use std::env;
+use std::str::FromStr;
 use std::time::Duration;
 
 use libot::{Bot, run};
 use libot::client::{BotClient, BotClientBuilder};
-use libot::model::{
-    ChallengeDeclinedEvent,
-    ChallengeEvent,
-    Color,
-    DeclineReason,
-    GameContext,
-    GameStartFinishEvent,
-    GameStateEvent,
-    Milliseconds
-};
+use libot::error::LibotResult;
+use libot::model::{ChallengeDeclinedEvent, ChallengeEvent, ChatLineEvent, ChatRoom, Color, DeclineReason, GameContext, GameStartFinishEvent, GameStateEvent, Milliseconds, Seconds};
 
 use kvarko_engine::{KvarkoEngine, StateEvaluatingController, StateEvaluator};
 use kvarko_engine::depth::IterativeDeepeningForDuration;
@@ -51,6 +44,43 @@ fn map_player(player: Player) -> Color {
 }
 
 struct KvarkoBot;
+
+const MAX_TIME_PER_REQUEST: Seconds = 60;
+
+const MAX_GIVEN_TIME: Seconds = 1800;
+
+impl KvarkoBot {
+    async fn execute_time_command(&self, args: &[&str], context: &GameContext, client: &BotClient)
+            -> LibotResult<()> {
+        if args.len() != 1 {
+            client.send_chat_message(context.id.clone(), ChatRoom::Player,
+                "Expect exactly 1 argument (number of seconds).").await?;
+            return Ok(());
+        }
+
+        if let Ok(mut seconds) = Seconds::from_str(args[0]) {
+            if seconds > 0 && seconds <= MAX_GIVEN_TIME {
+                while seconds > MAX_TIME_PER_REQUEST {
+                    client.add_time(context.id.clone(), MAX_TIME_PER_REQUEST).await?;
+                    seconds -= MAX_TIME_PER_REQUEST;
+                }
+
+                client.add_time(context.id.clone(), seconds).await?;
+                client.send_chat_message(context.id.clone(), ChatRoom::Player, "Ok.").await?;
+            }
+            else {
+                client.send_chat_message(context.id.clone(), ChatRoom::Player,
+                    "Number of seconds must be between 1 and 86400.").await?;
+            }
+        }
+        else {
+            client.send_chat_message(context.id.clone(), ChatRoom::Player,
+                "Not a valid number.").await?;
+        }
+
+        Ok(())
+    }
+}
 
 #[async_trait::async_trait]
 impl Bot for KvarkoBot {
@@ -109,6 +139,19 @@ impl Bot for KvarkoBot {
                 output.recommended_move.to_uci_notation(kvarko_state.position()).unwrap();
 
             client.make_move(game_context.id.clone(), move_uci, false).await.unwrap();
+        }
+    }
+
+    async fn on_chat_line(&self, context: &GameContext, chat_line: ChatLineEvent,
+            client: &BotClient) {
+        if context.bot_color.is_some() && chat_line.text.starts_with('!') {
+            let parts = chat_line.text[1..].split(' ').collect::<Vec<_>>();
+            let (&command, args) = parts.split_first().unwrap();
+
+            if command == "time" {
+                // TODO error handling
+                self.execute_time_command(args, context, client).await.unwrap();
+            }
         }
     }
 }
