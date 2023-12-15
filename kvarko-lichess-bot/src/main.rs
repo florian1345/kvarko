@@ -1,15 +1,16 @@
+use std::collections::HashSet;
 use std::env;
 use std::str::FromStr;
+use std::sync::RwLock;
 use std::time::Duration;
 
 use libot::{Bot, run};
 use libot::client::{BotClient, BotClientBuilder};
 use libot::error::LibotResult;
-use libot::model::{ChallengeDeclinedEvent, ChallengeEvent, ChatLineEvent, ChatRoom, Color, DeclineReason, GameContext, GameStartFinishEvent, GameStateEvent, Milliseconds, Seconds};
+use libot::model::{ChallengeDeclinedEvent, ChallengeEvent, ChatLineEvent, ChatRoom, Color, DeclineReason, GameContext, GameId, GameStartFinishEvent, GameStateEvent, Milliseconds, Seconds};
 
-use kvarko_engine::{KvarkoEngine, StateEvaluatingController, StateEvaluator};
+use kvarko_engine::{KvarkoEngine, KvarkoEngineMetadata, StateEvaluatingController, StateEvaluator, StateEvaluatorOutput};
 use kvarko_engine::depth::IterativeDeepeningForDuration;
-
 use kvarko_model::hash::ZobristHasher;
 use kvarko_model::player::Player;
 use kvarko_model::state::State;
@@ -43,7 +44,9 @@ fn map_player(player: Player) -> Color {
     }
 }
 
-struct KvarkoBot;
+struct KvarkoBot {
+    info_games: RwLock<HashSet<GameId>>
+}
 
 const MAX_TIME_PER_REQUEST: Seconds = 60;
 
@@ -80,6 +83,38 @@ impl KvarkoBot {
 
         Ok(())
     }
+
+    async fn execute_info_command(&self, args: &[&str], context: &GameContext, client: &BotClient)
+            -> LibotResult<()> {
+        if !args.is_empty() {
+            client.send_chat_message(context.id.clone(), ChatRoom::Player,
+                "No arguments expected.").await?;
+            return Ok(());
+        }
+
+        self.info_games.write().unwrap().insert(context.id.clone());
+        client.send_chat_message(context.id.clone(), ChatRoom::Player, "Ok.").await?;
+
+        Ok(())
+    }
+
+    async fn send_info(&self, output: StateEvaluatorOutput<KvarkoEngineMetadata>,
+            game_id: GameId, client: &BotClient) -> LibotResult<()> {
+        if !self.info_games.read().unwrap().contains(&game_id) {
+            return Ok(());
+        }
+
+        let message = match output.metadata {
+            KvarkoEngineMetadata::BookMove =>
+                format!("Book Move\nEval: {:.2} pawns", output.evaluation),
+            KvarkoEngineMetadata::ComputedMove(tree_search_metadata) =>
+                format!("Computed Move\nEval: {:.2} pawns\nDepth: {} ply",
+                    output.evaluation, tree_search_metadata.depth)
+        };
+        client.send_chat_message(game_id, ChatRoom::Player, message).await.unwrap();
+
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -90,7 +125,11 @@ impl Bot for KvarkoBot {
     }
 
     async fn on_game_finish(&self, game: GameStartFinishEvent, _: &BotClient) {
-        println!("Game Finish: {:?}", game);
+        if let Some(game_id) = game.id {
+            if self.info_games.read().unwrap().contains(&game_id) {
+                self.info_games.write().unwrap().remove(&game_id);
+            }
+        }
     }
 
     async fn on_challenge(&self, challenge: ChallengeEvent, client: &BotClient) {
@@ -140,6 +179,8 @@ impl Bot for KvarkoBot {
             if let Err(e) = client.make_move(game_context.id.clone(), move_uci, false).await {
                 eprintln!("error sending move: {:?}", e); // TODO proper tracing
             }
+
+            self.send_info(output, game_context.id.clone(), client).await.unwrap();
         }
     }
 
@@ -149,9 +190,11 @@ impl Bot for KvarkoBot {
             let parts = chat_line.text[1..].split(' ').collect::<Vec<_>>();
             let (&command, args) = parts.split_first().unwrap();
 
-            if command == "time" {
+            match command {
                 // TODO error handling
-                self.execute_time_command(args, context, client).await.unwrap();
+                "time" => self.execute_time_command(args, context, client).await.unwrap(),
+                "info" => self.execute_info_command(args, context, client).await.unwrap(),
+                _ => {}
             }
         }
     }
@@ -163,8 +206,11 @@ async fn main() {
     let client = BotClientBuilder::new()
         .with_token(token)
         .build().unwrap();
+    let bot = KvarkoBot {
+        info_games: RwLock::new(HashSet::new())
+    };
 
-    match run(KvarkoBot, client).await {
+    match run(bot, client).await {
         Ok(_) => { },
         Err(e) => {
             eprintln!("error running bot: {}", e)
