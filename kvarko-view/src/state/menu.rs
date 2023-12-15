@@ -13,7 +13,11 @@ use kvarko_model::state::State;
 use crate::state::{DynGameState, GameplayState, GameState, Transition};
 use crate::ui::{Alignment, AxisAlignment, Button, Label, Ui};
 
-const DEEPEN_FOR_MAP: [(Duration, &str); 11] = [
+const DEEPEN_FOR_MAP: [(Duration, &str); 17] = [
+    (Duration::from_millis(20), "20 ms"),
+    (Duration::from_millis(30), "30 ms"),
+    (Duration::from_millis(50), "50 ms"),
+    (Duration::from_millis(100), "100 ms"),
     (Duration::from_millis(200), "200 ms"),
     (Duration::from_millis(300), "300 ms"),
     (Duration::from_millis(500), "500 ms"),
@@ -24,7 +28,9 @@ const DEEPEN_FOR_MAP: [(Duration, &str); 11] = [
     (Duration::from_secs(3), "3 s"),
     (Duration::from_secs(5), "5 s"),
     (Duration::from_secs(7), "7 s"),
-    (Duration::from_secs(10), "10 s")
+    (Duration::from_secs(10), "10 s"),
+    (Duration::from_secs(15), "15 s"),
+    (Duration::from_secs(20), "20 s")
 ];
 
 fn get_next_deepen_for(current_deepen_for: Duration) -> Duration {
