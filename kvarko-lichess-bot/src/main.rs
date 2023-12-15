@@ -7,7 +7,11 @@ use std::time::Duration;
 use libot::{Bot, run};
 use libot::client::{BotClient, BotClientBuilder};
 use libot::error::LibotResult;
-use libot::model::{ChallengeDeclinedEvent, ChallengeEvent, ChatLineEvent, ChatRoom, Color, DeclineReason, GameContext, GameId, GameStartFinishEvent, GameStateEvent, Milliseconds, Seconds};
+use libot::model::{Milliseconds, Seconds};
+use libot::model::bot_event::{ChallengeDeclinedEvent, ChallengeEvent, GameStartFinishEvent};
+use libot::model::challenge::DeclineReason;
+use libot::model::game::{Color, GameContext, GameId};
+use libot::model::game::event::{ChatLineEvent, ChatRoom, GameStateEvent};
 
 use kvarko_engine::{KvarkoEngine, KvarkoEngineMetadata, StateEvaluatingController, StateEvaluator, StateEvaluatorOutput};
 use kvarko_engine::depth::IterativeDeepeningForDuration;
