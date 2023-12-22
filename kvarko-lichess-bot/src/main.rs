@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::env;
+use std::fs::File;
 use std::str::FromStr;
 use std::sync::RwLock;
 use std::time::Duration;
@@ -14,6 +15,7 @@ use libot::model::game::{Color, GameContext, GameId};
 use libot::model::game::event::{ChatLineEvent, ChatRoom, GameStateEvent};
 
 use kvarko_engine::{KvarkoEngine, KvarkoEngineMetadata, StateEvaluatingController, StateEvaluator, StateEvaluatorOutput};
+use kvarko_engine::book::OpeningBook;
 use kvarko_engine::depth::IterativeDeepeningForDuration;
 use kvarko_model::hash::ZobristHasher;
 use kvarko_model::player::Player;
@@ -22,8 +24,22 @@ use kvarko_model::state::State;
 type Kvarko = StateEvaluatingController<
     KvarkoEngine<ZobristHasher<u64>, IterativeDeepeningForDuration>>;
 
-fn kvarko_engine(deepen_for: Duration) -> Kvarko {
-    kvarko_engine::kvarko_engine(deepen_for, None)
+fn load_opening_book() -> Option<OpeningBook> {
+    const OPENING_BOOK_FILE: &str = "resources/opening-book.kob";
+
+    let mut file = File::open(OPENING_BOOK_FILE).ok()?;
+
+    match OpeningBook::load(&mut file) {
+        Ok(book) => Some(book),
+        Err(e) => {
+            eprintln!("Error loading opening book: {}", e);
+            None
+        }
+    }
+}
+
+fn kvarko_engine(deepen_for: Duration, opening_book: Option<&OpeningBook>) -> Kvarko {
+    kvarko_engine::kvarko_engine(deepen_for, opening_book.cloned())
 }
 
 const MIN_FROM_TOTAL: f64 = 0.005;
@@ -49,7 +65,8 @@ fn map_player(player: Player) -> Color {
 }
 
 struct KvarkoBot {
-    info_games: RwLock<HashSet<GameId>>
+    info_games: RwLock<HashSet<GameId>>,
+    opening_book: Option<OpeningBook>
 }
 
 const MAX_TIME_PER_REQUEST: Seconds = 60;
@@ -77,7 +94,7 @@ impl KvarkoBot {
             }
             else {
                 client.send_chat_message(context.id.clone(), ChatRoom::Player,
-                    "Number of seconds must be between 1 and 86400.").await?;
+                    format!("Number of seconds must be between 1 and {}.", MAX_GIVEN_TIME)).await?;
             }
         }
         else {
@@ -109,12 +126,12 @@ impl KvarkoBot {
         }
 
         let message = match output.metadata {
-            KvarkoEngineMetadata::BookMove =>
-                format!("Book Move\nEval: {:.2} pawns", output.evaluation),
+            KvarkoEngineMetadata::BookMove => "Book Move".to_owned(),
             KvarkoEngineMetadata::ComputedMove(tree_search_metadata) =>
                 format!("Computed Move\nEval: {:.2} pawns\nDepth: {} ply",
                     output.evaluation, tree_search_metadata.depth)
         };
+
         client.send_chat_message(game_id, ChatRoom::Player, message).await.unwrap();
 
         Ok(())
@@ -175,7 +192,7 @@ impl Bot for KvarkoBot {
             };
             let deepen_for = compute_deepen_for(total, increment);
 
-            let mut kvarko = kvarko_engine(deepen_for);
+            let mut kvarko = kvarko_engine(deepen_for, self.opening_book.as_ref());
             let output = kvarko.evaluate_state(&mut kvarko_state);
             let move_uci =
                 output.recommended_move.to_uci_notation(kvarko_state.position()).unwrap();
@@ -211,7 +228,8 @@ async fn main() {
         .with_token(token)
         .build().unwrap();
     let bot = KvarkoBot {
-        info_games: RwLock::new(HashSet::new())
+        info_games: RwLock::new(HashSet::new()),
+        opening_book: load_opening_book()
     };
 
     match run(bot, client).await {
