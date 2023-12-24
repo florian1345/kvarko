@@ -338,10 +338,10 @@ where
     H: PositionHasher,
     H::Hash: TTableHash
 {
-    base_evaluator: E,
-    presorter: S,
-    depth_strategy: D,
-    ttable: TranspositionTable<H, TreeSearchTableEntry, DepthAndBound>
+    pub base_evaluator: E,
+    pub presorter: S,
+    pub depth_strategy: D,
+    pub ttable: TranspositionTable<H, TreeSearchTableEntry, DepthAndBound>
 }
 
 impl<H, E, S, D> TreeSearchEvaluator<H, E, S, D>
@@ -495,7 +495,7 @@ where
 /// would make the underlying state evaluator return the worst evaluation for
 /// the opponent.
 #[derive(Clone)]
-pub struct StateEvaluatingController<E>(E);
+pub struct StateEvaluatingController<E>(pub E);
 
 impl<H, E> StateEvaluator<H> for StateEvaluatingController<E>
 where
@@ -559,8 +559,8 @@ where
     H: PositionHasher,
     H::Hash: TTableHash
 {
-    opening_book: Option<OpeningBook>,
-    evaluator: KvarkoEvaluator<H, D>
+    pub opening_book: Option<OpeningBook>,
+    pub evaluator: KvarkoEvaluator<H, D>
 }
 
 impl<H, D> StateEvaluator<H> for KvarkoEngine<H, D>
