@@ -10,7 +10,7 @@ use libot::client::{BotClient, BotClientBuilder};
 use libot::error::LibotResult;
 use libot::model::{Milliseconds, Seconds};
 use libot::model::bot_event::{ChallengeDeclinedEvent, ChallengeEvent, GameStartFinishEvent};
-use libot::model::challenge::DeclineReason;
+use libot::model::challenge::{ChallengeDirection, DeclineReason};
 use libot::model::game::{Color, GameContext, GameId};
 use libot::model::game::event::{ChatLineEvent, ChatRoom, GameStateEvent};
 
@@ -154,6 +154,10 @@ impl Bot for KvarkoBot {
     }
 
     async fn on_challenge(&self, challenge: ChallengeEvent, client: &BotClient) {
+        if challenge.direction != Some(ChallengeDirection::In) {
+            return;
+        }
+
         if challenge.rated {
             client.decline_challenge(challenge.id, Some(DeclineReason::Casual)).await.unwrap();
         }
