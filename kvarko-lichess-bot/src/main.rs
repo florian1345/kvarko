@@ -1,9 +1,14 @@
 use std::collections::HashSet;
+use std::convert::Infallible;
 use std::env;
 use std::fs::File;
 use std::str::FromStr;
 use std::sync::RwLock;
 use std::time::Duration;
+
+use async_trait::async_trait;
+
+use deadpool::managed::{Manager, Metrics, Object, Pool, RecycleResult};
 
 use libot::{Bot, run};
 use libot::client::{BotClient, BotClientBuilder};
@@ -38,10 +43,6 @@ fn load_opening_book() -> Option<OpeningBook> {
     }
 }
 
-fn kvarko_engine(deepen_for: Duration, opening_book: Option<&OpeningBook>) -> Kvarko {
-    kvarko_engine::kvarko_engine(deepen_for, opening_book.cloned())
-}
-
 const MIN_FROM_TOTAL: f64 = 0.005;
 const MAX_FROM_TOTAL: f64 = 0.05;
 const FROM_INCREMENT: f64 = 0.5;
@@ -64,9 +65,27 @@ fn map_player(player: Player) -> Color {
     }
 }
 
+struct KvarkoManager {
+    opening_book: Option<OpeningBook>
+}
+
+#[async_trait]
+impl Manager for KvarkoManager {
+    type Type = Kvarko;
+    type Error = Infallible;
+
+    async fn create(&self) -> Result<Kvarko, Infallible> {
+        Ok(kvarko_engine::kvarko_engine(Duration::from_millis(1), self.opening_book.clone()))
+    }
+
+    async fn recycle(&self, _: &mut Kvarko, _: &Metrics) -> RecycleResult<Infallible> {
+        Ok(())
+    }
+}
+
 struct KvarkoBot {
     info_games: RwLock<HashSet<GameId>>,
-    opening_book: Option<OpeningBook>
+    kvarko_pool: Pool<KvarkoManager>
 }
 
 const MAX_TIME_PER_REQUEST: Seconds = 60;
@@ -74,6 +93,14 @@ const MAX_TIME_PER_REQUEST: Seconds = 60;
 const MAX_GIVEN_TIME: Seconds = 1800;
 
 impl KvarkoBot {
+    async fn get_kvarko_instance(&self, deepen_for: Duration) -> Object<KvarkoManager> {
+        let mut kvarko = self.kvarko_pool.get().await.unwrap();
+        kvarko.0.evaluator.depth_strategy = IterativeDeepeningForDuration {
+            deepen_for,
+        };
+        kvarko
+    }
+
     async fn execute_time_command(&self, args: &[&str], context: &GameContext, client: &BotClient)
             -> LibotResult<()> {
         if args.len() != 1 {
@@ -196,7 +223,7 @@ impl Bot for KvarkoBot {
             };
             let deepen_for = compute_deepen_for(total, increment);
 
-            let mut kvarko = kvarko_engine(deepen_for, self.opening_book.as_ref());
+            let mut kvarko = self.get_kvarko_instance(deepen_for).await;
             let output = kvarko.evaluate_state(&mut kvarko_state);
             let move_uci =
                 output.recommended_move.to_uci_notation(kvarko_state.position()).unwrap();
@@ -231,9 +258,12 @@ async fn main() {
     let client = BotClientBuilder::new()
         .with_token(token)
         .build().unwrap();
+    let kvarko_manager = KvarkoManager {
+        opening_book: load_opening_book(),
+    };
     let bot = KvarkoBot {
         info_games: RwLock::new(HashSet::new()),
-        opening_book: load_opening_book()
+        kvarko_pool: Pool::builder(kvarko_manager).build().unwrap()
     };
 
     match run(bot, client).await {
