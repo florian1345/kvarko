@@ -203,6 +203,8 @@ impl Bot for KvarkoBot {
 
     async fn on_game_state(&self, game_context: &GameContext, state: GameStateEvent,
             client: &BotClient) {
+        const MOVE_RETRIES: i32 = 10;
+
         let kvarko_state = if state.moves.is_empty() {
             Some(State::initial())
         }
@@ -228,8 +230,16 @@ impl Bot for KvarkoBot {
             let move_uci =
                 output.recommended_move.to_uci_notation(kvarko_state.position()).unwrap();
 
-            if let Err(e) = client.make_move(game_context.id.clone(), move_uci, false).await {
-                eprintln!("error sending move: {:?}", e); // TODO proper tracing
+            for _ in 0..MOVE_RETRIES {
+                let game_id = game_context.id.clone();
+                let move_uci = move_uci.clone();
+
+                if let Err(e) = client.make_move(game_id, move_uci, false).await {
+                    eprintln!("error sending move: {:?}", e); // TODO proper tracing
+                }
+                else {
+                    break;
+                }
             }
 
             self.send_info(output, game_context.id.clone(), client).await.unwrap();
