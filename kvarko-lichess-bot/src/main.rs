@@ -12,16 +12,25 @@ use deadpool::managed::{Manager, Metrics, Object, Pool, RecycleResult};
 
 use libot::{Bot, run};
 use libot::client::{BotClient, BotClientBuilder};
+use libot::context::{BotContext, GameContext};
 use libot::error::LibotResult;
 use libot::model::{Milliseconds, Seconds};
 use libot::model::bot_event::{ChallengeDeclinedEvent, ChallengeEvent, GameStartFinishEvent};
-use libot::model::challenge::{ChallengeDirection, DeclineReason};
-use libot::model::game::{Color, GameContext, GameId};
-use libot::model::game::event::{ChatLineEvent, ChatRoom, GameStateEvent};
+use libot::model::challenge::DeclineReason;
+use libot::model::game::{Color, GameId};
+use libot::model::game::chat::ChatRoom;
+use libot::model::game::event::{ChatLineEvent, GameStateEvent};
 
-use kvarko_engine::{KvarkoEngine, KvarkoEngineMetadata, StateEvaluatingController, StateEvaluator, StateEvaluatorOutput};
+use kvarko_engine::{
+    KvarkoEngine,
+    KvarkoEngineMetadata,
+    StateEvaluatingController,
+    StateEvaluator,
+    StateEvaluatorOutput
+};
 use kvarko_engine::book::OpeningBook;
 use kvarko_engine::depth::IterativeDeepeningForDuration;
+
 use kvarko_model::hash::ZobristHasher;
 use kvarko_model::player::Player;
 use kvarko_model::state::State;
@@ -168,11 +177,11 @@ impl KvarkoBot {
 #[async_trait::async_trait]
 impl Bot for KvarkoBot {
 
-    async fn on_game_start(&self, game: GameStartFinishEvent, _: &BotClient) {
+    async fn on_game_start(&self, _: &BotContext, game: GameStartFinishEvent, _: &BotClient) {
         println!("Game Start: {:?}", game);
     }
 
-    async fn on_game_finish(&self, game: GameStartFinishEvent, _: &BotClient) {
+    async fn on_game_finish(&self, _: &BotContext, game: GameStartFinishEvent, _: &BotClient) {
         if let Some(game_id) = game.id {
             if self.info_games.read().unwrap().contains(&game_id) {
                 self.info_games.write().unwrap().remove(&game_id);
@@ -180,8 +189,9 @@ impl Bot for KvarkoBot {
         }
     }
 
-    async fn on_challenge(&self, challenge: ChallengeEvent, client: &BotClient) {
-        if challenge.direction != Some(ChallengeDirection::In) {
+    async fn on_challenge(&self, context: &BotContext, challenge: ChallengeEvent,
+            client: &BotClient) {
+        if !challenge.dest_user.is_some_and(|dest_user| dest_user.id == context.bot_id) {
             return;
         }
 
@@ -193,16 +203,22 @@ impl Bot for KvarkoBot {
         }
     }
 
-    async fn on_challenge_cancelled(&self, challenge: ChallengeEvent, _: &BotClient) {
+    async fn on_challenge_cancelled(&self, _: &BotContext, challenge: ChallengeEvent,
+            _: &BotClient) {
         println!("Challenge Canceled: {:?}", challenge);
     }
 
-    async fn on_challenge_declined(&self, challenge: ChallengeDeclinedEvent, _: &BotClient) {
+    async fn on_challenge_declined(&self, _: &BotContext, challenge: ChallengeDeclinedEvent,
+            _: &BotClient) {
         println!("Challenge Declined: {:?}", challenge);
     }
 
     async fn on_game_state(&self, game_context: &GameContext, state: GameStateEvent,
             client: &BotClient) {
+        if !state.status.is_running() {
+            return;
+        }
+
         const MOVE_RETRIES: i32 = 10;
 
         let kvarko_state = if state.moves.is_empty() {
@@ -215,7 +231,7 @@ impl Bot for KvarkoBot {
         if let Some(mut kvarko_state) = kvarko_state {
             let turn = kvarko_state.position().turn();
 
-            if game_context.bot_color != Some(map_player(turn)) || !state.status.is_running() {
+            if game_context.bot_color != Some(map_player(turn)) {
                 return;
             }
 
@@ -248,8 +264,8 @@ impl Bot for KvarkoBot {
 
     async fn on_chat_line(&self, context: &GameContext, chat_line: ChatLineEvent,
             client: &BotClient) {
-        if context.bot_color.is_some() && chat_line.text.starts_with('!') {
-            let parts = chat_line.text[1..].split(' ').collect::<Vec<_>>();
+        if context.bot_color.is_some() && chat_line.chat_line.text.starts_with('!') {
+            let parts = chat_line.chat_line.text[1..].split(' ').collect::<Vec<_>>();
             let (&command, args) = parts.split_first().unwrap();
 
             match command {
