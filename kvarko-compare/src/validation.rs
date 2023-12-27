@@ -31,7 +31,7 @@ impl Display for OpeningValidationErrors {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         for (index, error) in self.0.iter().enumerate() {
             if index > 0 {
-                write!(f, "\n")?;
+                writeln!(f)?;
             }
 
             write!(f, "{error}")?;
