@@ -2,12 +2,14 @@
 
 members = [
     "kvarko-cli",
+    "kvarko-compare",
     "kvarko-engine",
     "kvarko-lichess-bot",
     "kvarko-model",
     "kvarko-proc-macro",
     "kvarko-view"
 ]
+resolver = "2"
 
 [profile.release]
 opt-level = 3
