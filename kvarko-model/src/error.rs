@@ -262,7 +262,7 @@ pub type BuildGameResult<T = ()> = Result<T, BuildGameError>;
 
 /// An enumeration of errors that can occur when handling algebraic move
 /// notations.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum AlgebraicError {
 
     /// There is no specifier for the target square.
