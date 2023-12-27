@@ -1,0 +1,25 @@
+[package]
+name = "kvarko-compare"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+# Control which versions of Kvarko are compared by changing these dependencies.
+# By default, it compares the local version as "New" to the newest version on GitHub as "Old".
+# To use different states in the repository, use the `branch`, `rev`, or `tag` fields.
+
+kvarko-engine = { path = "../kvarko-engine" }
+kvarko-model = { path = "../kvarko-model" }
+kvarko-engine-old = { package = "kvarko-engine", git = "https://github.com/florian1345/kvarko" }
+kvarko-model-old = { package = "kvarko-model", git = "https://github.com/florian1345/kvarko" }
+
+# Ordinary dependencies
+
+rayon = "1.8"
+
+[dev-dependencies]
+kernal = "0.3"
+rstest = "0.18"
