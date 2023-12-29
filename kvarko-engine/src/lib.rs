@@ -154,19 +154,16 @@ where
     E: TTableEntry
 {
     match entry.bound() {
-        ValueBound::Exact => {
-            true
-        },
-        ValueBound::Lower => {
+        ValueBound::Exact => true,
+        ValueBound::Lower =>
             if entry.eval() >= *beta {
                 true
             }
             else {
                 *alpha = alpha.max(entry.eval());
                 false
-            }
-        },
-        ValueBound::Upper => {
+            },
+        ValueBound::Upper =>
             if entry.eval() <= *alpha {
                 true
             }
@@ -174,7 +171,6 @@ where
                 *beta = beta.min(entry.eval());
                 false
             }
-        }
     }
 }
 
@@ -210,12 +206,12 @@ where
     H: PositionHasher,
     H::Hash: TTableHash
 {
-    base_evaluator: E,
-    list_moves_in: L,
+    pub base_evaluator: E,
+    pub list_moves_in: L,
     bufs: Vec<Vec<Move>>,
-    transposition_table:
+    pub transposition_table:
         TranspositionTable<H, QuiescenceTableEntry, AlwaysReplace>,
-    presorter: S
+    pub presorter: S
 }
 
 impl<H, E, L, S> QuiescenseTreeSearchEvaluator<H, E, L, S>
@@ -249,6 +245,8 @@ where
 {
     fn evaluate_rec(&mut self, state: &mut State<H>, mut alpha: f32,
             mut beta: f32) -> f32 {
+        let original_alpha = alpha;
+        let original_beta = beta;
         let entry = self.transposition_table.get_entry(state.position_hash());
 
         if let Some(entry) = entry {
@@ -289,7 +287,7 @@ where
         self.transposition_table.enter(
             state.position_hash(), QuiescenceTableEntry {
                 eval: max,
-                bound: determine_bound(max, alpha, beta)
+                bound: determine_bound(max, original_alpha, original_beta)
             });
         self.bufs.push(moves);
 
@@ -369,6 +367,8 @@ where
 {
     fn evaluate_rec(&mut self, state: &mut State<H>, bufs: &mut [Vec<Move>],
             mut alpha: f32, mut beta: f32) -> (f32, Option<Move>) {
+        let original_alpha = alpha;
+        let original_beta = beta;
         let depth = bufs.len() as u32;
 
         if depth == 0 {
@@ -387,7 +387,9 @@ where
         let ttable_entry = self.ttable.get_entry(position_hash);
 
         if let Some(entry) = ttable_entry {
-            if entry.depth == depth && should_use_ttable_entry(&mut alpha, &mut beta, entry) {
+            let has_correct_depth = entry.depth == depth || (entry.depth <= depth && entry.is_forced_checkmate());
+
+            if has_correct_depth && should_use_ttable_entry(&mut alpha, &mut beta, entry) {
                 let mov = entry.recommended_move;
                 return (entry.eval, Some(mov))
             }
@@ -433,7 +435,7 @@ where
                 depth,
                 eval: max,
                 recommended_move: max_move,
-                bound: determine_bound(max, alpha, beta)
+                bound: determine_bound(max, original_alpha, original_beta)
             });
 
         (max, Some(max_move))

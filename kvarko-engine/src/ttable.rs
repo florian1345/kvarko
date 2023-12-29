@@ -8,6 +8,7 @@ use kvarko_model::movement::Move;
 use bitvec::bitbox;
 use bitvec::boxed::BitBox;
 
+use crate::CHECKMATE_DELTA;
 use crate::depth::Depth;
 
 /// A trait for types to be used as position hashes for transposition tables.
@@ -101,8 +102,22 @@ pub struct DepthAndBound;
 impl ReplacementPolicy<TreeSearchTableEntry> for DepthAndBound {
     fn replace(&self, current: &TreeSearchTableEntry,
             new: &TreeSearchTableEntry) -> bool {
-        new.depth > current.depth ||
-            (new.depth == current.depth && new.bound > current.bound)
+        if new.depth > current.depth {
+            return true;
+        }
+
+        if new.depth < current.depth {
+            return false;
+        }
+
+        match (new.bound, current.bound) {
+            (ValueBound::Exact, _) => true,
+            (ValueBound::Upper, ValueBound::Upper) => new.eval <= current.eval,
+            (ValueBound::Lower, ValueBound::Lower) => new.eval >= current.eval,
+            (ValueBound::Upper, ValueBound::Lower) => new.eval <= -current.eval,
+            (ValueBound::Lower, ValueBound::Upper) => new.eval >= -current.eval,
+            _ => false
+        }
     }
 }
 
@@ -137,6 +152,17 @@ pub struct TreeSearchTableEntry {
     /// The kind [ValueBound] provided in [TreeSearchTableEntry::eval], that
     /// is, whether it is a exact value or a lower or upper bound.
     pub bound: ValueBound
+}
+
+impl TreeSearchTableEntry {
+    #[inline]
+    pub(crate) fn is_forced_checkmate(&self) -> bool {
+        match self.bound {
+            ValueBound::Lower => self.eval > CHECKMATE_DELTA,
+            ValueBound::Upper => self.eval < -CHECKMATE_DELTA,
+            ValueBound::Exact => self.eval > CHECKMATE_DELTA || self.eval < -CHECKMATE_DELTA
+        }
+    }
 }
 
 impl TTableEntry for TreeSearchTableEntry {

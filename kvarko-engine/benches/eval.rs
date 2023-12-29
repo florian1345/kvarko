@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use criterion::{criterion_group, criterion_main, Criterion, BenchmarkGroup};
 use criterion::measurement::WallTime;
@@ -32,7 +32,18 @@ fn bench_opening_with_depth(history: &str, depth: Depth,
     let mut kvarko = kvarko(depth);
 
     benchmark_group.bench_function(format!("depth {depth}"),
-        |bencher| bencher.iter(|| kvarko.evaluate_state(&mut state)));
+        |bencher| bencher.iter_custom(|iters| {
+            let mut total = Duration::ZERO;
+
+            for _ in 0..iters {
+                kvarko.0.evaluator.base_evaluator.transposition_table.clear();
+                let start = Instant::now();
+                kvarko.evaluate_state(&mut state);
+                total += start.elapsed();
+            }
+
+            total
+        }));
 }
 
 struct BenchmarkGroupData {
