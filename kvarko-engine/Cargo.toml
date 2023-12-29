@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 bincode = "1.3"
+bitvec = "1.0"
 kvarko-model = { path = "../kvarko-model" }
 serde = { version = "1.0", features = [ "derive" ] }
 

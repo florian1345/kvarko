@@ -1,8 +1,14 @@
 use std::fmt::Debug;
+use std::iter;
+use std::mem::MaybeUninit;
+
 use kvarko_model::hash::PositionHasher;
 use kvarko_model::movement::Move;
 
-use std::iter;
+use bitvec::bitbox;
+use bitvec::boxed::BitBox;
+
+use crate::depth::Depth;
 
 /// A trait for types to be used as position hashes for transposition tables.
 pub trait TTableHash : Copy + Clone + Debug + Eq {
@@ -22,6 +28,7 @@ impl TTableHash for u64 {
 /// table entry can provide. This depends on the amount and kind of pruning
 /// that occurred during its evaluation.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u8)]
 pub enum ValueBound {
 
     /// The value provided is a lower bound on the actual value given the
@@ -114,11 +121,11 @@ pub trait TTableEntry {
 
 /// A transposition table entry used during ordinary tree search with known
 /// search depth.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TreeSearchTableEntry {
 
     /// The search depth starting from the node for which this entry is made.
-    pub depth: u32,
+    pub depth: Depth,
 
     /// The evaluation found from the search. This may also be a lower or upper
     /// bound as determined by [TreeSearchTableEntry::bound].
@@ -145,7 +152,7 @@ impl TTableEntry for TreeSearchTableEntry {
 /// A transposition table entry used in quiescence search. As that is done
 /// without tracking an explicit depth and recommended move, these pieces of
 /// information are missing.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct QuiescenceTableEntry {
 
     /// The evaluation found from the quiescence search. This may also be a
@@ -167,18 +174,20 @@ impl TTableEntry for QuiescenceTableEntry {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 #[allow(clippy::type_complexity)]
 pub struct TranspositionTable<H, E, R>
 where
     H: PositionHasher,
-    H::Hash: TTableHash,
+    H::Hash: TTableHash + Copy,
+    E: Copy,
     R: ReplacementPolicy<E>
 {
     // Sadly, we cannot create a type alias for table cells as that does not
     // allow necessary annotations for the generics.
 
-    entries: Box<[Option<(H::Hash, E)>]>,
+    entries: Box<[MaybeUninit<(H::Hash, E)>]>,
+    control: BitBox,
     mask: usize,
     replacement_policy: R
 }
@@ -186,17 +195,20 @@ where
 impl<H, E, R> TranspositionTable<H, E, R>
 where
     H: PositionHasher,
-    H::Hash: TTableHash,
+    H::Hash: TTableHash + Copy,
+    E: Copy,
     R: ReplacementPolicy<E>
 {
     pub fn new(bits: u32, replacement_policy: R)
             -> TranspositionTable<H, E, R> {
         let len = 1usize << bits;
-        let entries = iter::repeat_with(|| Option::None).take(len).collect();
+        let entries = iter::repeat_with(MaybeUninit::uninit).take(len).collect();
+        let control = bitbox![0; len];
         let mask = len - 1;
 
         TranspositionTable {
             entries,
+            control,
             mask,
             replacement_policy
         }
@@ -205,33 +217,49 @@ where
     pub fn get_entry(&self, hash: H::Hash) -> Option<&E> {
         let idx = hash.as_usize() & self.mask;
 
-        self.entries[idx].as_ref().filter(|(h, _)| h == &hash).map(|(_, e)| e)
+        if self.control[idx] {
+            let (entry_hash, entry) = unsafe { self.entries[idx].assume_init_ref() };
+
+            if entry_hash == &hash {
+                Some(entry)
+            }
+            else {
+                None
+            }
+        }
+        else {
+            None
+        }
     }
 
     pub fn enter(&mut self, hash: H::Hash, new_entry: E) {
         let idx = hash.as_usize() & self.mask;
         let entry = &mut self.entries[idx];
 
-        if let Some((_, entry)) = entry {
-            if !self.replacement_policy.replace(entry, &new_entry) {
+        if self.control[idx] {
+            let old_entry = unsafe { &entry.assume_init_ref().1 };
+
+            if !self.replacement_policy.replace(old_entry, &new_entry) {
                 return;
             }
         }
 
-        *entry = Some((hash, new_entry));
+        *entry = MaybeUninit::new((hash, new_entry));
+        self.control.set(idx, true);
     }
 }
 
 impl<H, E, R> TranspositionTable<H, E, R>
 where
     H: PositionHasher,
-    H::Hash: TTableHash,
+    H::Hash: TTableHash + Copy,
+    E: Copy,
     R: ReplacementPolicy<E>,
     E: Clone
 {
 
     /// Removes all entries from the transposition table.
     pub fn clear(&mut self) {
-        self.entries.as_mut().fill(None);
+        self.control.fill(false)
     }
 }
