@@ -596,6 +596,9 @@ where
     }
 }
 
+pub const DEFAULT_TREE_SEARCH_TTABLE_BITS: u32 = 22;
+pub const DEFAULT_QUIESCENCE_SEARCH_TTABLE_BITS: u32 = 16;
+
 /// Constructs a [KvarkoEngine].
 ///
 /// # Arguments
@@ -616,7 +619,11 @@ where
     H: PositionHasher,
     H::Hash: TTableHash
 {
-    kvarko_engine_with_ttable_bits(deepen_for, opening_book, 22, 16)
+    kvarko_engine_with_ttable_bits(
+        deepen_for,
+        opening_book,
+        DEFAULT_TREE_SEARCH_TTABLE_BITS,
+        DEFAULT_QUIESCENCE_SEARCH_TTABLE_BITS)
 }
 
 /// Constructs a [KvarkoEngine] with given transposition table sizes.

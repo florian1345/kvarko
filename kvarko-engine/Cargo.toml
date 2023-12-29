@@ -11,5 +11,10 @@ kvarko-model = { path = "../kvarko-model" }
 serde = { version = "1.0", features = [ "derive" ] }
 
 [dev-dependencies]
+criterion = "0.5"
 kernal = "0.2"
 rstest = "0.18"
+
+[[bench]]
+name = "eval"
+harness = false
