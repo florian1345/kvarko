@@ -16,7 +16,6 @@ use pgn_reader::{
     RawHeader
 };
 
-use std::cmp::Ordering;
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter};
 use std::str;
@@ -91,6 +90,8 @@ impl DatabaseTree {
     }
 
     fn value(&self, player: Player) -> Evaluation {
+        // TODO factor in amount of occurrences?
+
         let advantage = match player {
             Player::White =>
                 self.white_victories as i32 - self.black_victories as i32,
@@ -111,20 +112,7 @@ impl DatabaseTree {
         let player = state.position().turn();
         let value = self.value(player);
         let best_move = self.children.iter()
-            .max_by(|(_, child_1), (_, child_2)| {
-                let value_1 = child_1.value(player);
-                let value_2 = child_2.value(player);
-
-                if value_1 < value_2 {
-                    Ordering::Less
-                }
-                else if value_1 > value_2 {
-                    Ordering::Greater
-                }
-                else {
-                    Ordering::Equal
-                }
-            })
+            .max_by_key(|(_, child)| child.value(player))
             .unwrap().0.clone();
         let best_move = &format!("{}", best_move);
         let best_move = Move::parse_algebraic(state.position(), best_move)?;
