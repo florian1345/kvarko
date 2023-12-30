@@ -20,9 +20,9 @@ use std::cmp::Ordering;
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter};
 use std::str;
+use kvarko_engine::eval::{Centipawns, Evaluation};
 
-const OCCURRENCE_VALUE: f32 = 0.01;
-const VICTORY_VALUE: f32 = 0.0;
+const MAX_VALUE_CENTIPAWNS: i32 = 500;
 
 struct DatabaseTree {
     white_victories: u32,
@@ -90,17 +90,16 @@ impl DatabaseTree {
         self.white_victories + self.black_victories + self.draws
     }
 
-    fn value(&self, player: Player) -> f32 {
-        match player {
+    fn value(&self, player: Player) -> Evaluation {
+        let advantage = match player {
             Player::White =>
-                self.white_victories as f32 * VICTORY_VALUE -
-                    self.black_victories as f32 * VICTORY_VALUE +
-                    self.occurrences() as f32 * OCCURRENCE_VALUE,
+                self.white_victories as i32 - self.black_victories as i32,
             Player::Black =>
-                self.black_victories as f32 * VICTORY_VALUE -
-                    self.white_victories as f32 * VICTORY_VALUE +
-                    self.occurrences() as f32 * OCCURRENCE_VALUE
-        }
+                self.black_victories as i32 - self.white_victories as i32
+        };
+        let centipawns = advantage * MAX_VALUE_CENTIPAWNS / self.occurrences() as i32;
+
+        Evaluation::from_centipawns(centipawns as Centipawns).unwrap()
     }
 
     fn enter_in_book(&self, min_occurrences: u32, state: &mut State<IdHasher>,
