@@ -7,9 +7,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 
+use crate::eval::Evaluation;
+
 #[derive(Clone, Deserialize, Serialize)]
 struct OpeningBookEntry {
-    value: f32,
+    value: Evaluation,
     best_move: Move,
     at_ply: usize
 }
@@ -96,7 +98,7 @@ impl OpeningBook {
     /// Gets the value of a given `state` from the perspective of the player
     /// whose turn it is, or `None` if the state is not contained in this
     /// opening book.
-    pub fn get_value<H>(&self, state: &State<H>) -> Option<f32>
+    pub fn get_value<H>(&self, state: &State<H>) -> Option<Evaluation>
     where
         H: PositionHasher
     {
@@ -121,7 +123,7 @@ impl OpeningBook {
     /// * `value`: The evaluation from the player's perspective whose turn it
     /// is.
     /// * `best_move`: The recommended [Move] for the player whose turn it is.
-    pub fn add_entry<H>(&mut self, state: &State<H>, value: f32,
+    pub fn add_entry<H>(&mut self, state: &State<H>, value: Evaluation,
         best_move: Move)
     where
         H: PositionHasher

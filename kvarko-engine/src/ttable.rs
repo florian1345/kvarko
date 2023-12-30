@@ -8,8 +8,8 @@ use kvarko_model::movement::Move;
 use bitvec::bitbox;
 use bitvec::boxed::BitBox;
 
-use crate::CHECKMATE_DELTA;
 use crate::depth::Depth;
+use crate::eval::Evaluation;
 
 /// A trait for types to be used as position hashes for transposition tables.
 pub trait TTableHash : Copy + Clone + Debug + Eq {
@@ -127,7 +127,7 @@ pub trait TTableEntry {
 
     /// Gets the evaluation of found from the search. This may also be a lower
     /// or upper bound as determined by [TTableEntry::bound].
-    fn eval(&self) -> f32;
+    fn eval(&self) -> Evaluation;
 
     /// Gets the kind [ValueBound] provided in [TTableEntry::eval], that is,
     /// whether it is a exact value or a lower or upper bound.
@@ -144,7 +144,7 @@ pub struct TreeSearchTableEntry {
 
     /// The evaluation found from the search. This may also be a lower or upper
     /// bound as determined by [TreeSearchTableEntry::bound].
-    pub eval: f32,
+    pub eval: Evaluation,
 
     /// The [Move] that search yielded as optimal.
     pub recommended_move: Move,
@@ -158,15 +158,15 @@ impl TreeSearchTableEntry {
     #[inline]
     pub(crate) fn is_forced_checkmate(&self) -> bool {
         match self.bound {
-            ValueBound::Lower => self.eval > CHECKMATE_DELTA,
-            ValueBound::Upper => self.eval < -CHECKMATE_DELTA,
-            ValueBound::Exact => self.eval > CHECKMATE_DELTA || self.eval < -CHECKMATE_DELTA
+            ValueBound::Lower => self.eval.is_forced_checkmate_for_turn(),
+            ValueBound::Upper => self.eval.is_forced_checkmate_for_opponent(),
+            ValueBound::Exact => self.eval.is_forced_checkmate()
         }
     }
 }
 
 impl TTableEntry for TreeSearchTableEntry {
-    fn eval(&self) -> f32 {
+    fn eval(&self) -> Evaluation {
         self.eval
     }
 
@@ -183,7 +183,7 @@ pub struct QuiescenceTableEntry {
 
     /// The evaluation found from the quiescence search. This may also be a
     /// lower or upper bound as determined by [QuiescenceTableEntry::bound].
-    pub eval: f32,
+    pub eval: Evaluation,
 
     /// The kind [ValueBound] provided in [QuiescenceTableEntry::eval], that
     /// is, whether it is a exact value or a lower or upper bound.
@@ -191,7 +191,7 @@ pub struct QuiescenceTableEntry {
 }
 
 impl TTableEntry for QuiescenceTableEntry {
-    fn eval(&self) -> f32 {
+    fn eval(&self) -> Evaluation {
         self.eval
     }
 
