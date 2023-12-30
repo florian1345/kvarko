@@ -1,3 +1,5 @@
+use crate::eval::{Centipawns, Evaluation};
+
 use kvarko_model::board::{Bitboard, Board};
 use kvarko_model::hash::PositionHasher;
 use kvarko_model::movement;
@@ -31,8 +33,8 @@ pub trait BaseEvaluator<H: PositionHasher> {
     /// current position, where negative numbers are more probably defeats than
     /// victories and positive numbers are more probably victories than
     /// defeats.
-    fn evaluate_state(&mut self, state: &mut State<H>, alpha: f32, beta: f32)
-        -> f32 {
+    fn evaluate_state(&mut self, state: &mut State<H>, alpha: Evaluation, beta: Evaluation)
+            -> Evaluation {
         let (moves, check) = movement::count_moves(state.position());
 
         self.evaluate_state_with_precomputed_data(
@@ -64,22 +66,22 @@ pub trait BaseEvaluator<H: PositionHasher> {
     /// victories and positive numbers are more probably victories than
     /// defeats.
     fn evaluate_state_with_precomputed_data(&mut self, state: &mut State<H>,
-        alpha: f32, beta: f32, move_count: usize, check: bool) -> f32;
+        alpha: Evaluation, beta: Evaluation, move_count: usize, check: bool) -> Evaluation;
 }
 
-const DEFAULT_MATERIAL_VALUES: [f32; 6] = [
-    1.0,
-    3.0,
-    3.25,
-    5.0,
-    9.0,
-    10.0
+const DEFAULT_MATERIAL_VALUES: [Centipawns; 6] = [
+    100,
+    300,
+    325,
+    500,
+    900,
+    1000
 ];
 
-const DEFAULT_MOVE_VALUE: f32 = 0.05;
-const DEFAULT_DOUBLED_PAWN_PENALTY: f32 = 0.25;
-const DEFAULT_PAWN_SIXTH_RANK_VALUE: f32 = 0.1;
-const DEFAULT_PAWN_SEVENTH_RANK_VALUE: f32 = 0.3;
+const DEFAULT_MOVE_VALUE: Centipawns = 5;
+const DEFAULT_DOUBLED_PAWN_PENALTY: Centipawns = 25;
+const DEFAULT_PAWN_SIXTH_RANK_VALUE: Centipawns = 10;
+const DEFAULT_PAWN_SEVENTH_RANK_VALUE: Centipawns = 30;
 
 const FILES: [Bitboard; 8] = [
     Bitboard(0x0101010101010101),
@@ -109,17 +111,17 @@ const RELEVANT_PIECES: [Piece; 5] = [
 /// for a given position.
 #[derive(Clone)]
 pub struct KvarkoBaseEvaluator {
-    values: [f32; 6],
-    move_value: f32,
-    doubled_pawn_penalty: f32,
-    pawn_sixth_rank_value: f32,
-    pawn_seventh_rank_value: f32
+    values: [Centipawns; 6],
+    move_value: Centipawns,
+    doubled_pawn_penalty: Centipawns,
+    pawn_sixth_rank_value: Centipawns,
+    pawn_seventh_rank_value: Centipawns
 }
 
 impl KvarkoBaseEvaluator {
 
     #[inline]
-    fn evaluate_pawn_ranks(&self, player: Player, pawns: Bitboard) -> f32 {
+    fn evaluate_pawn_ranks(&self, player: Player, pawns: Bitboard) -> Centipawns {
         let sixth_rank_pawns;
         let seventh_rank_pawns;
 
@@ -134,50 +136,48 @@ impl KvarkoBaseEvaluator {
             }
         }
 
-        sixth_rank_pawns as f32 * self.pawn_sixth_rank_value +
-            seventh_rank_pawns as f32 * self.pawn_seventh_rank_value
+        sixth_rank_pawns as Centipawns * self.pawn_sixth_rank_value +
+            seventh_rank_pawns as Centipawns * self.pawn_seventh_rank_value
     }
 
     #[inline]
-    fn evaluate_move_count(&self, position: &Position, move_count: usize,
-        opponent: Player) -> f32 {
+    fn evaluate_move_count(&self, position: &Position, move_count: usize, opponent: Player)
+            -> Centipawns {
         let opponent_moves = {
             let mut position = position.clone();
             position.set_turn(opponent);
             movement::count_moves(&position).0
         };
 
-        (move_count as f32 - opponent_moves as f32) * self.move_value
+        (move_count as Centipawns - opponent_moves as Centipawns) * self.move_value
     }
 
     #[inline]
-    fn evaluate_material(&self, board: &Board, turn: Player, opponent: Player)
-        -> f32 {
-        let mut value = 0.0;
+    fn evaluate_material(&self, board: &Board, turn: Player, opponent: Player) -> Centipawns {
+        let mut value = 0;
 
         for piece in RELEVANT_PIECES {
             let piece_value = self.values[piece as usize];
 
             value += piece_value *
-                board.of_player_and_kind(turn, piece).len() as f32;
+                board.of_player_and_kind(turn, piece).len() as Centipawns;
             value -= piece_value *
-                board.of_player_and_kind(opponent, piece).len() as f32;
+                board.of_player_and_kind(opponent, piece).len() as Centipawns;
         }
 
         value
     }
 
     #[inline]
-    fn evaluate_doubled_pawns(&self, own_pawns: Bitboard,
-        opponent_pawns: Bitboard) -> f32 {
-        let mut value = 0.0;
+    fn evaluate_doubled_pawns(&self, own_pawns: Bitboard, opponent_pawns: Bitboard) -> Centipawns {
+        let mut value = 0;
 
         for file in FILES {
             let own_pawns = (own_pawns & file).len().saturating_sub(1);
-            value -= self.doubled_pawn_penalty * own_pawns as f32;
+            value -= self.doubled_pawn_penalty * own_pawns as Centipawns;
 
             let opponent_pawns = (opponent_pawns & file).len().saturating_sub(1);
-            value += self.doubled_pawn_penalty * opponent_pawns as f32;
+            value += self.doubled_pawn_penalty * opponent_pawns as Centipawns;
         }
 
         value
@@ -197,25 +197,23 @@ impl Default for KvarkoBaseEvaluator {
     }
 }
 
-const CHECKMATE_VALUE: f32 = 1_000_000_000.0;
-
 /// The value of a position in which the active player has no moves remaining.
 /// The parameter indicates whether the player is in check.
 #[inline]
-pub fn evaluate_if_no_moves_remain(check: bool) -> f32 {
+pub fn evaluate_if_no_moves_remain(check: bool) -> Evaluation {
     if check {
-        -CHECKMATE_VALUE
+        Evaluation::CHECKMATED
     } else {
-        0.0
+        Evaluation::ZERO
     }
 }
 
 impl<H: PositionHasher> BaseEvaluator<H> for KvarkoBaseEvaluator {
 
     fn evaluate_state_with_precomputed_data(&mut self, state: &mut State<H>,
-            _: f32, _: f32, move_count: usize, check: bool) -> f32 {
+            _: Evaluation, _: Evaluation, move_count: usize, check: bool) -> Evaluation {
         if state.is_stateful_draw() {
-            return 0.0;
+            return Evaluation::ZERO;
         }
 
         let position = state.position();
@@ -231,11 +229,13 @@ impl<H: PositionHasher> BaseEvaluator<H> for KvarkoBaseEvaluator {
         let own_pawns = board.of_player_and_kind(turn, Piece::Pawn);
         let opponent_pawns = board.of_player_and_kind(opponent, Piece::Pawn);
 
-        self.evaluate_move_count(position, move_count, opponent)
+        let centipawns = self.evaluate_move_count(position, move_count, opponent)
             + self.evaluate_material(board, turn, opponent)
             + self.evaluate_doubled_pawns(own_pawns, opponent_pawns)
             + self.evaluate_pawn_ranks(turn, own_pawns)
-            - self.evaluate_pawn_ranks(opponent, opponent_pawns)
+            - self.evaluate_pawn_ranks(opponent, opponent_pawns);
+
+        Evaluation::from_centipawns_unchecked(centipawns)
     }
 }
 
@@ -256,10 +256,10 @@ mod tests {
     }
 
     fn eval_with_kvarko_base_evaluator(state: &mut State<ZobristHasher<u64>>)
-            -> f32 {
+            -> Evaluation {
         let mut base_evaluator = KvarkoBaseEvaluator::default();
 
-        base_evaluator.evaluate_state(state, f32::NEG_INFINITY, f32::INFINITY)
+        base_evaluator.evaluate_state(state, Evaluation::NEG_INFINITY, Evaluation::INFINITY)
     }
 
     #[test]
@@ -276,7 +276,7 @@ mod tests {
         let doubled_pawns_eval =
             eval_with_kvarko_base_evaluator(&mut doubled_pawns);
 
-        assert_that!(no_doubled_pawns_eval).is_greater_than(doubled_pawns_eval + 0.01);
+        assert_that!(no_doubled_pawns_eval).is_greater_than(doubled_pawns_eval);
     }
 
     #[test]
@@ -375,7 +375,7 @@ mod tests {
 
         let eval = eval_with_kvarko_base_evaluator(&mut state);
 
-        assert_that!(eval).is_equal_to(-CHECKMATE_VALUE);
+        assert_that!(eval).is_equal_to(Evaluation::CHECKMATED);
     }
 
     #[test]

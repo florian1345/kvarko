@@ -23,7 +23,7 @@ use crate::openings::TESTED_OPENINGS;
 mod openings;
 mod validation;
 
-const DEEPEN_FOR: Duration = Duration::from_millis(50);
+const DEEPEN_FOR: Duration = Duration::from_millis(10);
 
 trait ControllerAdapter {
 

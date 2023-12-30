@@ -1,17 +1,16 @@
-use std::cmp::Ordering;
 use std::iter;
 use std::time::Duration;
-use base_evaluator::BaseEvaluator;
 
 use kvarko_model::game::Controller;
 use kvarko_model::hash::PositionHasher;
 use kvarko_model::movement::{self, Move, MoveProcessor};
 use kvarko_model::piece::Piece;
 use kvarko_model::state::{Position, State};
-use crate::base_evaluator::KvarkoBaseEvaluator;
 
+use crate::base_evaluator::{BaseEvaluator, KvarkoBaseEvaluator};
 use crate::book::OpeningBook;
 use crate::depth::{Depth, DepthStrategy, IterativeDeepeningForDuration};
+use crate::eval::Evaluation;
 use crate::sort::{CapturePromotionValuePresorter, Presorter};
 use crate::ttable::{
     AlwaysReplace,
@@ -27,32 +26,16 @@ use crate::ttable::{
 pub mod base_evaluator;
 pub mod book;
 pub mod depth;
+pub mod eval;
 pub mod ordering;
 pub mod sort;
 pub mod ttable;
-
-#[derive(PartialEq)]
-struct OrdF32(f32);
-
-impl Eq for OrdF32 { }
-
-impl PartialOrd for OrdF32 {
-    fn partial_cmp(&self, other: &OrdF32) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for OrdF32 {
-    fn cmp(&self, other: &OrdF32) -> Ordering {
-        self.0.partial_cmp(&other.0).unwrap()
-    }
-}
 
 /// The output given by a [StateEvaluator] on evaluation of a state.
 pub struct StateEvaluatorOutput<M> {
 
     /// The evaluation of the position according to the evaluator.
-    pub evaluation: f32,
+    pub evaluation: Evaluation,
 
     /// The move which the evaluator determined to be best.
     pub recommended_move: Move,
@@ -87,8 +70,6 @@ pub trait StateEvaluator<H: PositionHasher> {
     fn evaluate_state(&mut self, state: &mut State<H>)
         -> StateEvaluatorOutput<Self::Metadata>;
 }
-
-const CHECKMATE_DELTA: f32 = 1_000_000.0;
 
 pub trait ListMovesIn {
     fn list_moves_in(&self, position: &Position, moves: &mut Vec<Move>)
@@ -148,7 +129,7 @@ const QUIESCENSE_BUFFER_COUNT: usize = 30;
 
 /// Applies the information stored in `entry` to the given alpha and beta
 /// bounds. If an early return is possible, `true` is returned.
-fn should_use_ttable_entry<E>(alpha: &mut f32, beta: &mut f32,
+fn should_use_ttable_entry<E>(alpha: &mut Evaluation, beta: &mut Evaluation,
     entry: &E) -> bool
 where
     E: TTableEntry
@@ -160,7 +141,7 @@ where
                 true
             }
             else {
-                *alpha = alpha.max(entry.eval());
+                *alpha = (*alpha).max(entry.eval());
                 false
             },
         ValueBound::Upper =>
@@ -168,24 +149,14 @@ where
                 true
             }
             else {
-                *beta = beta.min(entry.eval());
+                *beta = (*beta).min(entry.eval());
                 false
             }
     }
 }
 
 #[inline]
-fn apply_penalty_for_extra_move_if_checkmate(value: &mut f32) {
-    if *value > CHECKMATE_DELTA {
-        *value -= CHECKMATE_DELTA;
-    }
-    else if *value < -CHECKMATE_DELTA {
-        *value += CHECKMATE_DELTA;
-    }
-}
-
-#[inline]
-fn determine_bound(max: f32, alpha: f32, beta: f32) -> ValueBound {
+fn determine_bound(max: Evaluation, alpha: Evaluation, beta: Evaluation) -> ValueBound {
     if max >= beta {
         ValueBound::Lower
     }
@@ -220,8 +191,7 @@ where
     H::Hash: TTableHash
 {
     pub fn new(base_evaluator: E, list_moves_in: L, presorter: S,
-            ttable_bits: u32)
-            -> QuiescenseTreeSearchEvaluator<H, E, L, S> {
+            ttable_bits: u32) -> QuiescenseTreeSearchEvaluator<H, E, L, S> {
         QuiescenseTreeSearchEvaluator {
             base_evaluator,
             list_moves_in,
@@ -243,8 +213,8 @@ where
     L: ListMovesIn,
     S: Presorter
 {
-    fn evaluate_rec(&mut self, state: &mut State<H>, mut alpha: f32,
-            mut beta: f32) -> f32 {
+    fn evaluate_rec(&mut self, state: &mut State<H>, mut alpha: Evaluation,
+            mut beta: Evaluation) -> Evaluation {
         let original_alpha = alpha;
         let original_beta = beta;
         let entry = self.transposition_table.get_entry(state.position_hash());
@@ -303,13 +273,13 @@ where
     L: ListMovesIn,
     S: Presorter
 {
-    fn evaluate_state(&mut self, state: &mut State<H>, alpha: f32, beta: f32)
-            -> f32 {
+    fn evaluate_state(&mut self, state: &mut State<H>, alpha: Evaluation, beta: Evaluation)
+            -> Evaluation {
         self.evaluate_rec(state, alpha, beta)
     }
 
     fn evaluate_state_with_precomputed_data(&mut self, state: &mut State<H>,
-            alpha: f32, beta: f32, _: usize, _: bool) -> f32 {
+            alpha: Evaluation, beta: Evaluation, _: usize, _: bool) -> Evaluation {
         self.evaluate_state(state, alpha, beta)
     }
 }
@@ -366,10 +336,10 @@ where
     S: Presorter
 {
     fn evaluate_rec(&mut self, state: &mut State<H>, bufs: &mut [Vec<Move>],
-            mut alpha: f32, mut beta: f32) -> (f32, Option<Move>) {
+            mut alpha: Evaluation, mut beta: Evaluation) -> (Evaluation, Option<Move>) {
         let original_alpha = alpha;
         let original_beta = beta;
-        let depth = bufs.len() as u32;
+        let depth = bufs.len() as Depth;
 
         if depth == 0 {
             let evaluation =
@@ -380,7 +350,7 @@ where
 
         if state.is_stateful_draw() {
             // Checkmate is covered later
-            return (0.0, None);
+            return (Evaluation::ZERO, None);
         }
 
         let position_hash = state.position_hash();
@@ -406,17 +376,15 @@ where
 
         presort_moves(&mut self.presorter, moves, position, ttable_entry);
 
-        let mut max = f32::NEG_INFINITY;
+        let mut max = Evaluation::NEG_INFINITY;
         let mut max_move = None;
 
         for mov in moves {
             let revert_info = state.make_move(mov);
             let (rec_value, _) =
                 self.evaluate_rec(state, bufs_rest, -beta, -alpha);
-            let mut value = -rec_value;
+            let value = rec_value.in_previous_turn();
             state.unmake_move(mov, revert_info);
-
-            apply_penalty_for_extra_move_if_checkmate(&mut value);
 
             if value > max {
                 max = value;
@@ -471,7 +439,7 @@ where
             -> StateEvaluatorOutput<TreeSearchEvaluatorMetadata> {
         let mut bufs = vec![];
         self.ttable.clear();
-        let mut value = 0.0;
+        let mut value = Evaluation::ZERO;
         let mut mov = None;
         let mut max_depth = 0;
 
@@ -479,7 +447,7 @@ where
             max_depth = max_depth.max(depth);
             let bufs = get_mut_slice_of_len(&mut bufs, depth as usize);
             (value, mov) = self.evaluate_rec(
-                state, bufs, f32::NEG_INFINITY, f32::INFINITY);
+                state, bufs, Evaluation::NEG_INFINITY, Evaluation::INFINITY);
         }
 
         StateEvaluatorOutput {

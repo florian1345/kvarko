@@ -23,7 +23,6 @@ const TTABLE_BITS: [u32; 6] = [
 ];
 
 const DEEPEN_FOR: Duration = Duration::from_millis(10);
-const EPSILON: f32 = 0.0001;
 
 #[rstest]
 #[case::initial_position("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")]
@@ -67,7 +66,7 @@ fn ttable_size_irrelevant_for(#[case] fen: &str) {
         };
 
         if let Some(&(expected_eval, expected_move)) = expectations_by_depth.get(&depth) {
-            assert_that!(expected_eval).is_close_to(output.evaluation, EPSILON);
+            assert_that!(expected_eval).is_equal_to(output.evaluation);
             assert_that!(expected_move).is_equal_to(output.recommended_move);
         }
         else {
