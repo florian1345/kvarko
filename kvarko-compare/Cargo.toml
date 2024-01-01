@@ -18,6 +18,7 @@ kvarko-model-old = { package = "kvarko-model", git = "https://github.com/florian
 
 # Ordinary dependencies
 
+clap = { version = "4", features = [ "derive" ] }
 rayon = "1.8"
 
 [dev-dependencies]

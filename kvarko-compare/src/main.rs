@@ -1,6 +1,8 @@
+use std::num::NonZeroUsize;
 use std::ops::{Add, AddAssign};
 use std::thread;
 use std::time::Duration;
+use clap::Parser;
 
 use kvarko_engine_old::{KvarkoEngine as OldKvarkoEngine, StateEvaluatingController as OldStateEvaluatingController};
 use kvarko_engine_old::depth::IterativeDeepeningForDuration as OldIterativeDeepeningForDuration;
@@ -17,13 +19,13 @@ use kvarko_model::game::Controller;
 use kvarko_model::hash::ZobristHasher;
 use kvarko_model::player::Player;
 use kvarko_model::state::{Outcome, State};
+use crate::args::Args;
 
 use crate::openings::TESTED_OPENINGS;
 
+mod args;
 mod openings;
 mod validation;
-
-const DEEPEN_FOR: Duration = Duration::from_millis(10);
 
 trait ControllerAdapter {
 
@@ -40,8 +42,8 @@ impl ControllerAdapter for Kvarko {
     }
 }
 
-fn kvarko() -> Box<dyn ControllerAdapter> {
-    Box::new(kvarko_engine::kvarko_engine(DEEPEN_FOR, None))
+fn kvarko(deepen_for: Duration) -> Box<dyn ControllerAdapter> {
+    Box::new(kvarko_engine::kvarko_engine(deepen_for, None))
 }
 
 type OldKvarko = OldStateEvaluatingController<OldKvarkoEngine<OldZobristHasher<u64>, OldIterativeDeepeningForDuration>>;
@@ -54,8 +56,8 @@ impl ControllerAdapter for OldKvarko {
     }
 }
 
-fn kvarko_old() -> Box<dyn ControllerAdapter> {
-    Box::new(kvarko_engine_old::kvarko_engine(DEEPEN_FOR, None))
+fn kvarko_old(deepen_for: Duration) -> Box<dyn ControllerAdapter> {
+    Box::new(kvarko_engine_old::kvarko_engine(deepen_for, None))
 }
 
 #[derive(Clone, Copy)]
@@ -104,11 +106,12 @@ fn test_opening_with_controllers(tested_opening: &str,
     }
 }
 
-fn test_opening(tested_opening: &str) -> Comparison {
+fn test_opening(tested_opening: &str, deepen_for: Duration) -> Comparison {
     let mut old_score = 0;
     let mut new_score = 0;
 
-    match test_opening_with_controllers(tested_opening, kvarko(), kvarko_old()) {
+    match test_opening_with_controllers(tested_opening,
+            kvarko(deepen_for), kvarko_old(deepen_for)) {
         Outcome::Victory(Player::White) => new_score += 2,
         Outcome::Victory(Player::Black) => old_score += 2,
         Outcome::Draw => {
@@ -117,7 +120,8 @@ fn test_opening(tested_opening: &str) -> Comparison {
         }
     }
 
-    match test_opening_with_controllers(tested_opening, kvarko_old(), kvarko()) {
+    match test_opening_with_controllers(tested_opening,
+            kvarko_old(deepen_for), kvarko(deepen_for)) {
         Outcome::Victory(Player::White) => old_score += 2,
         Outcome::Victory(Player::Black) => new_score += 2,
         Outcome::Draw => {
@@ -144,7 +148,11 @@ fn build_thread_pool(num_threads: usize) {
 }
 
 fn main() {
-    let num_threads = thread::available_parallelism().unwrap().get();
+    let args = Args::parse();
+    let num_threads = args.threads
+        .or_else(|| thread::available_parallelism().ok())
+        .unwrap_or(NonZeroUsize::MIN)
+        .get();
 
     build_thread_pool(num_threads);
 
@@ -154,7 +162,7 @@ fn main() {
     }
 
     let result = TESTED_OPENINGS.into_par_iter()
-        .map(|&opening| test_opening(opening))
+        .map(|&opening| test_opening(opening, args.deepen_for))
         .reduce(|| Comparison { new_score: 0, old_score: 0 }, Add::add);
 
     println!("New: {}", result.new_score);

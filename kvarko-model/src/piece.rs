@@ -20,7 +20,7 @@ pub enum Piece {
     /// diagonally behind the enemy pawn.
     Pawn = 0,
 
-    // A knight. Can move and take on all squares that have a distance of two
+    /// A knight. Can move and take on all squares that have a distance of two
     /// on one axis and a distance of one on the other axis.
     Knight = 1,
 
