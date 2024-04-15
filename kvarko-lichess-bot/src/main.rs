@@ -15,8 +15,8 @@ use libot::client::{BotClient, BotClientBuilder};
 use libot::context::{BotContext, GameContext};
 use libot::error::LibotResult;
 use libot::model::{Milliseconds, Seconds};
-use libot::model::bot_event::{ChallengeDeclinedEvent, ChallengeEvent, GameStartFinishEvent};
-use libot::model::challenge::DeclineReason;
+use libot::model::bot_event::GameStartFinish;
+use libot::model::challenge::{Challenge, ChallengeDeclined, DeclineReason};
 use libot::model::game::{Color, GameId};
 use libot::model::game::chat::ChatRoom;
 use libot::model::game::event::{ChatLineEvent, GameStateEvent};
@@ -177,11 +177,11 @@ impl KvarkoBot {
 #[async_trait::async_trait]
 impl Bot for KvarkoBot {
 
-    async fn on_game_start(&self, _: &BotContext, game: GameStartFinishEvent, _: &BotClient) {
+    async fn on_game_start(&self, _: &BotContext, game: GameStartFinish, _: &BotClient) {
         println!("Game Start: {:?}", game);
     }
 
-    async fn on_game_finish(&self, _: &BotContext, game: GameStartFinishEvent, _: &BotClient) {
+    async fn on_game_finish(&self, _: &BotContext, game: GameStartFinish, _: &BotClient) {
         if let Some(game_id) = game.id {
             if self.info_games.read().unwrap().contains(&game_id) {
                 self.info_games.write().unwrap().remove(&game_id);
@@ -189,7 +189,7 @@ impl Bot for KvarkoBot {
         }
     }
 
-    async fn on_challenge(&self, context: &BotContext, challenge: ChallengeEvent,
+    async fn on_challenge(&self, context: &BotContext, challenge: Challenge,
             client: &BotClient) {
         if !challenge.dest_user.is_some_and(|dest_user| dest_user.id == context.bot_id) {
             return;
@@ -203,12 +203,12 @@ impl Bot for KvarkoBot {
         }
     }
 
-    async fn on_challenge_cancelled(&self, _: &BotContext, challenge: ChallengeEvent,
+    async fn on_challenge_cancelled(&self, _: &BotContext, challenge: Challenge,
             _: &BotClient) {
         println!("Challenge Canceled: {:?}", challenge);
     }
 
-    async fn on_challenge_declined(&self, _: &BotContext, challenge: ChallengeDeclinedEvent,
+    async fn on_challenge_declined(&self, _: &BotContext, challenge: ChallengeDeclined,
             _: &BotClient) {
         println!("Challenge Declined: {:?}", challenge);
     }
@@ -231,7 +231,7 @@ impl Bot for KvarkoBot {
         if let Some(mut kvarko_state) = kvarko_state {
             let turn = kvarko_state.position().turn();
 
-            if game_context.bot_color != Some(map_player(turn)) {
+            if kvarko_state.is_stateful_draw() || game_context.bot_color != Some(map_player(turn)) {
                 return;
             }
 
