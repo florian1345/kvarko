@@ -4,7 +4,7 @@
 use crate::board::{Board, Bitboard, Location};
 use crate::error::{FenError, FenResult, AlgebraicResult};
 use crate::hash::{PositionHasher, IdHasher};
-use crate::movement::{Move, list_moves};
+use crate::movement::{Move, list_moves, LEFT_FILE, RIGHT_FILE};
 use crate::piece::Piece;
 use crate::player::{Black, Player, StaticPlayer, White, PLAYER_COUNT, PLAYERS};
 use crate::rules;
@@ -382,6 +382,25 @@ impl Position {
             hasher.on_piece_left(captured, self.turn.opponent(), dest);
         }
     }
+    
+    #[inline]
+    fn is_en_passant_possible_after_move<P>(&self, moved: Piece, delta_mask: Bitboard) -> bool
+    where
+        P: StaticPlayer
+    {
+        if moved == Piece::Pawn && !(delta_mask & P::SECOND_RANK).is_empty() &&
+                !(delta_mask & P::FOURTH_RANK).is_empty() {
+            let target_singleton = delta_mask & P::FOURTH_RANK;
+            let left_neighbor = (target_singleton - LEFT_FILE) >> 1;
+            let right_neighbor = (target_singleton - RIGHT_FILE) << 1;
+            let neighbors = left_neighbor | right_neighbor;
+            let opponent_pawns = self.board.of_player_and_kind(self.turn.opponent(), Piece::Pawn);
+
+            return !(neighbors & opponent_pawns).is_empty();
+        }
+        
+        false
+    }
 
     fn apply_ordinary_move<P, H>(&mut self, moved: Piece, captured: Option<Piece>,
         delta_mask: Bitboard, hasher: &mut H)
@@ -391,15 +410,13 @@ impl Position {
     {
         self.notify_movement(delta_mask, moved, captured, hasher);
 
-        if moved == Piece::Pawn && !(delta_mask & P::SECOND_RANK).is_empty() &&
-                !(delta_mask & P::FOURTH_RANK).is_empty() {
+        if self.is_en_passant_possible_after_move::<P>(moved, delta_mask) {
             self.en_passant_file = delta_mask.min_unchecked().file();
             hasher.on_en_passant_enabled(self.en_passant_file);
             return;
         }
-        else {
-            self.en_passant_file = usize::MAX;
-        }
+
+        self.en_passant_file = usize::MAX;
 
         if moved == Piece::King {
             self.disable_short_castling(self.turn, hasher);

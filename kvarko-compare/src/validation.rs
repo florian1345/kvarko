@@ -19,7 +19,7 @@ impl Display for OpeningValidationError {
             OpeningValidationError::LoadError(opening, error) =>
                 write!(f, "Error loading opening `{opening}`: {error}"),
             OpeningValidationError::Collision(opening_1, opening_2) =>
-                write!(f, "Collision between openings `{opening_1}` and {opening_2}")
+                write!(f, "Collision between openings `{opening_1}` and `{opening_2}`")
         }
     }
 }
