@@ -22,8 +22,8 @@ const KNIGHT_ATTACK_MASKS: [Bitboard; 64] =
     kvarko_proc_macro::knight_attacks!();
 const KING_ATTACK_MASKS: [Bitboard; 64] = kvarko_proc_macro::king_attacks!();
 
-const LEFT_FILE: Bitboard = Bitboard(0x0101010101010101);
-const RIGHT_FILE: Bitboard = Bitboard(0x8080808080808080);
+pub(crate) const LEFT_FILE: Bitboard = Bitboard(0x0101010101010101);
+pub(crate) const RIGHT_FILE: Bitboard = Bitboard(0x8080808080808080);
 const WHITE_EN_PASSANT_TARGET_RANK: usize = 5;
 const BLACK_EN_PASSANT_TARGET_RANK: usize = 2;
 

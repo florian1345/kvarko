@@ -197,7 +197,6 @@ pub(crate) const TESTED_OPENINGS: &[&str] = &[
     "d4 Nf6 c4 g6 Nf3",
     "d4 Nf6 c4 c5",
     "d4 Nf6 c4 e5",
-    "d4 Nf6 Nf3 g6 c4",
     "d4 Nf6 Nf3 g6 Bf4",
     "d4 Nf6 Nf3 g6 g3",
     "d4 Nf6 Nf3 e6",
@@ -329,7 +328,6 @@ pub(crate) const TESTED_OPENINGS: &[&str] = &[
     "g3 d5 Bg2 e5",
     "g3 d5 Bg2 Nf6",
     "g3 d5 Bg2 c6",
-    "g3 e5 Bg2 d5",
     "g3 Nf6",
     
     "e3 e5",
