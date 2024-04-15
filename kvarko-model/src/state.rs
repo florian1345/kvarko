@@ -1519,7 +1519,7 @@ mod tests {
     }
 
     #[test]
-    fn pawn_double_push_sets_en_passant_file() {
+    fn pawn_double_push_does_not_set_open_file_if_en_passant_is_not_possible() {
         // Board (white to move):
         // ┌───┬───┬───┬───┬───┬───┬───┬───┐
         // │ r │ n │ b │ q │ k │ b │ n │ r │
@@ -1549,7 +1549,42 @@ mod tests {
         };
 
         test_move(fen, mov, |state| {
-            assert_eq!(Some(3), state.position().en_passant_file());
+            assert_eq!(None, state.position().en_passant_file());
+        });
+    }
+
+    #[test]
+    fn pawn_double_push_sets_open_file_if_en_passant_is_possible() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │ r │ n │ b │ q │ k │ b │ n │ r │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ p │ p │ p │   │ p │ p │ p │ p │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ p │ P │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ P │ P │ P │ P │   │ P │ P │ P │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ R │ N │ B │ Q │ K │ B │ N │ R │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // Black moves the pawn to f5.
+
+        let fen = "rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR b KQkq - 0 2";
+        let mov = Move::Ordinary {
+            moved: Piece::Pawn,
+            captured: None,
+            delta_mask: Bitboard(0x0020002000000000)
+        };
+
+        test_move(fen, mov, |state| {
+            assert_eq!(Some(5), state.position().en_passant_file());
         });
     }
 
