@@ -196,7 +196,7 @@ impl<D> Drawable for Ui<D> {
     }
 
     fn blend_mode(&self) -> Option<BlendMode> {
-        self.elements.get(0).and_then(|e| e.blend_mode())
+        self.elements.first().and_then(|e| e.blend_mode())
     }
 }
 
