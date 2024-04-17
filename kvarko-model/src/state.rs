@@ -1,7 +1,7 @@
 //! This module defines the [Position] and [State] structs, which manage
 //! information about the current game situation.
 
-use crate::board::{Board, Bitboard, Location};
+use crate::board::{Board, Bitboard, Location, File, Rank};
 use crate::error::{FenError, FenResult, AlgebraicResult};
 use crate::hash::{PositionHasher, IdHasher};
 use crate::movement::{Move, list_moves, LEFT_FILE, RIGHT_FILE};
@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 pub struct PositionRevertInfo {
     short_castles: [bool; PLAYER_COUNT],
     long_castles: [bool; PLAYER_COUNT],
-    en_passant_file: usize
+    en_passant_file: Option<File>
 }
 
 /// A unique ID for [Position]s that is smaller than positions in terms of
@@ -38,7 +38,7 @@ pub struct Position {
     board: Board,
     short_castles: [bool; PLAYER_COUNT],
     long_castles: [bool; PLAYER_COUNT],
-    en_passant_file: usize,
+    en_passant_file: Option<File>,
     turn: Player
 }
 
@@ -111,9 +111,9 @@ fn parse_castling_rights(fen: &str)
     }
 }
 
-fn parse_en_passant_file(fen: &str) -> FenResult<usize> {
+fn parse_en_passant_file(fen: &str) -> FenResult<Option<File>> {
     if fen == "-" {
-        Ok(usize::MAX)
+        Ok(None)
     }
     else {
         let chars = fen.chars().collect::<Vec<_>>();
@@ -125,12 +125,12 @@ fn parse_en_passant_file(fen: &str) -> FenResult<usize> {
             let file_char = chars[0];
             let rank_char = chars[1];
 
-            if !('a'..='h').contains(&file_char) ||
-                    !('1'..='8').contains(&rank_char) {
-                Err(FenError::InvalidEnPassantTarget(fen.to_owned()))
+            if let (Some(file), Some(_)) =
+                    (File::from_char(file_char), Rank::from_char(rank_char)) {
+                Ok(Some(file))
             }
             else {
-                Ok(file_char as usize - 'a' as usize)
+                Err(FenError::InvalidEnPassantTarget(fen.to_owned()))
             }
         }
     }
@@ -150,7 +150,7 @@ impl Position {
             board: Board::initial(),
             short_castles: [true, true],
             long_castles: [true, true],
-            en_passant_file: usize::MAX,
+            en_passant_file: None,
             turn: Player::White
         }
     }
@@ -251,20 +251,16 @@ impl Position {
         self.long_castles[player as usize]
     }
 
-    /// Gets the 0-based index of the file (A = 0, B = 1, ...) in which a pawn
-    /// just moved two squares at once, if that is the case.
+    /// Gets the [File] towards which en-passant is currently possible, if that
+    /// is the case. Note this does not consider potential pins or checks which
+    /// may prevent en-passant from being actually played.
     ///
     /// # Returns
     ///
-    /// `Some(file)` if a pawn just moved two squares at once in the given
-    /// `file`, otherwise `None`.
-    pub fn en_passant_file(&self) -> Option<usize> {
-        if self.en_passant_file == usize::MAX {
-            None
-        }
-        else {
-            Some(self.en_passant_file)
-        }
+    /// `Some(file)` if en-passant is currently possible in the given `file`,
+    /// otherwise `None`.
+    pub fn en_passant_file(&self) -> Option<File> {
+        self.en_passant_file
     }
 
     /// Gets the [Player] whose turn it currently is.
@@ -284,7 +280,7 @@ impl Position {
     /// * `turn`: The [Player] whose turn it shall be.
     pub fn set_turn(&mut self, turn: Player) {
         self.turn = turn;
-        self.en_passant_file = usize::MAX;
+        self.en_passant_file = None;
     }
 
     /// Gets a unique ID for this position. This can be used as keys for hash
@@ -301,8 +297,9 @@ impl Position {
         board_id[2] ^= Bitboard(0u64.wrapping_sub(self.short_castles[0] as u64));
         board_id[3] ^= Bitboard(0u64.wrapping_sub(self.short_castles[1] as u64));
 
-        let additional_data =
-            (self.en_passant_file as u8) << 1 | self.turn as u8;
+        let en_passant_file_byte =
+            self.en_passant_file().map(File::as_usize).unwrap_or(0xff) as u8;
+        let additional_data = en_passant_file_byte << 1 | self.turn as u8;
 
         PositionId {
             board_id,
@@ -411,12 +408,13 @@ impl Position {
         self.notify_movement(delta_mask, moved, captured, hasher);
 
         if self.is_en_passant_possible_after_move::<P>(moved, delta_mask) {
-            self.en_passant_file = delta_mask.min_unchecked().file();
-            hasher.on_en_passant_enabled(self.en_passant_file);
+            let en_passant_file = delta_mask.min_unchecked().file();
+            self.en_passant_file = Some(en_passant_file);
+            hasher.on_en_passant_enabled(en_passant_file);
             return;
         }
 
-        self.en_passant_file = usize::MAX;
+        self.en_passant_file = None;
 
         if moved == Piece::King {
             self.disable_short_castling(self.turn, hasher);
@@ -482,7 +480,7 @@ impl Position {
                 self.notify_movement(rook_delta_mask, Piece::Rook, None, hasher);
                 self.disable_short_castling(self.turn, hasher);
                 self.disable_long_castling(self.turn, hasher);
-                self.en_passant_file = usize::MAX;
+                self.en_passant_file = None;
             },
             Move::Promotion { captured, delta_mask, promotion } => {
                 let (src, dest) = self.src_dest(delta_mask, self.turn);
@@ -503,7 +501,7 @@ impl Position {
                             captured, delta_mask, hasher)
                 }
 
-                self.en_passant_file = usize::MAX;
+                self.en_passant_file = None;
             },
             Move::EnPassant { delta_mask, target } => {
                 let (src, dest) = self.src_dest(delta_mask, self.turn);
@@ -514,7 +512,7 @@ impl Position {
                 hasher.on_piece_left(
                     Piece::Pawn, self.turn.opponent(), target);
 
-                self.en_passant_file = usize::MAX;
+                self.en_passant_file = None;
             }
         }
 
@@ -592,8 +590,8 @@ impl Position {
             hasher.on_en_passant_disabled(en_passant_file);
         }
 
-        if revert_info.en_passant_file != usize::MAX {
-            hasher.on_en_passant_enabled(revert_info.en_passant_file);
+        if let Some(en_passant_file) = revert_info.en_passant_file {
+            hasher.on_en_passant_enabled(en_passant_file);
         }
 
         match *mov {
@@ -675,17 +673,17 @@ impl Position {
 
         fen.push(' ');
 
-        if self.en_passant_file == usize::MAX {
-            fen.push('-');
-        }
-        else {
-            fen.push(('a' as usize + self.en_passant_file) as u8 as char);
+        if let Some(en_passant_file) = self.en_passant_file {
+            fen.push(en_passant_file.as_char());
 
             match self.turn {
-                Player::White => fen.push('6'),
+                Player::White => fen.push('6'), // TODO use player-specific constants
                 Player::Black => fen.push('3')
             }
-        };
+        }
+        else {
+            fen.push('-');
+        }
 
         fen
     }
@@ -1584,7 +1582,7 @@ mod tests {
         };
 
         test_move(fen, mov, |state| {
-            assert_eq!(Some(5), state.position().en_passant_file());
+            assert_eq!(Some(File::F), state.position().en_passant_file());
         });
     }
 

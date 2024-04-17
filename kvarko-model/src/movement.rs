@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::iter::Peekable;
 use std::str::Chars;
 
-use crate::board::{Bitboard, Location, Board};
+use crate::board::{Bitboard, Location, Board, Rank, File};
 use crate::error::{AlgebraicResult, AlgebraicError};
 use crate::piece::Piece;
 use crate::player::{Black, CastleInfo, Player, StaticPlayer, White};
@@ -24,8 +24,8 @@ const KING_ATTACK_MASKS: [Bitboard; 64] = kvarko_proc_macro::king_attacks!();
 
 pub(crate) const LEFT_FILE: Bitboard = Bitboard(0x0101010101010101);
 pub(crate) const RIGHT_FILE: Bitboard = Bitboard(0x8080808080808080);
-const WHITE_EN_PASSANT_TARGET_RANK: usize = 5;
-const BLACK_EN_PASSANT_TARGET_RANK: usize = 2;
+const WHITE_EN_PASSANT_TARGET_RANK: Rank = Rank::R6;
+const BLACK_EN_PASSANT_TARGET_RANK: Rank = Rank::R3;
 
 fn get_slider_attack(occupancy: Bitboard, square: usize, magics: &[Magic; 64])
         -> Bitboard {
@@ -74,8 +74,8 @@ fn get_king_attack(square: Location) -> Bitboard {
 enum AlgebraicMove {
     Ordinary {
         moved: Piece,
-        src_file: Option<usize>,
-        src_rank: Option<usize>,
+        src_file: Option<File>,
+        src_rank: Option<Rank>,
         dest: Location,
         captures: bool,
         check: bool,
@@ -100,15 +100,6 @@ fn fmt_piece(piece: Piece, f: &mut Formatter) -> fmt::Result {
     }
 }
 
-fn fmt_file(file: usize, f: &mut Formatter) -> fmt::Result {
-    let file_char = char::from_u32('a' as u32 + file as u32).unwrap();
-    write!(f, "{}", file_char)
-}
-
-fn fmt_rank(rank: usize, f: &mut Formatter) -> fmt::Result {
-    write!(f, "{}", rank + 1)
-}
-
 impl Display for AlgebraicMove {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let (check, mate) = match *self {
@@ -125,19 +116,18 @@ impl Display for AlgebraicMove {
                 fmt_piece(moved, f)?;
 
                 if let Some(src_file) = src_file {
-                    fmt_file(src_file, f)?;
+                    write!(f, "{}", src_file)?;
                 }
 
                 if let Some(src_rank) = src_rank {
-                    fmt_rank(src_rank, f)?;
+                    write!(f, "{}", src_rank)?;
                 }
 
                 if captures {
                     write!(f, "x")?;
                 }
 
-                fmt_file(dest.file(), f)?;
-                fmt_rank(dest.rank(), f)?;
+                write!(f, "{}", dest)?;
 
                 if let Some(promotion) = promotion {
                     write!(f, "=")?;
@@ -170,25 +160,25 @@ impl Display for AlgebraicMove {
 }
 
 fn parse_complete_or_not_final_position(chars: &mut Peekable<Chars>)
-        -> AlgebraicResult<(Option<usize>, Option<usize>)> {
+        -> AlgebraicResult<(Option<File>, Option<Rank>)> {
     let mut file = None;
     let mut rank = None;
 
     match chars.peek() {
-        Some(&c) if ('a'..='h').contains(&c) => {
-            file = Some(c as usize - 'a' as usize);
+        Some(&c) if File::from_char(c).is_some() => {
+            file = File::from_char(c);
             chars.next();
             
             let c = *chars.peek()
                 .ok_or(AlgebraicError::IncompleteDestination)?;
 
-            if ('1'..='8').contains(&c) {
-                rank = Some(c as usize - '1' as usize);
+            if let Some(rank_from_char) = Rank::from_char(c) {
+                rank = Some(rank_from_char);
                 chars.next();
             }
         },
-        Some(&c) if ('1'..='8').contains(&c) => {
-            rank = Some(c as usize - '1' as usize);
+        Some(&c) if Rank::from_char(c).is_some() => {
+            rank = Rank::from_char(c);
             chars.next();
         },
         Some(_) => { },
@@ -304,8 +294,7 @@ impl AlgebraicMove {
             moved,
             src_file,
             src_rank,
-            dest: Location::from_file_and_rank(
-                dest_file.unwrap(), dest_rank.unwrap()).unwrap(),
+            dest: Location::from_file_and_rank(dest_file.unwrap(), dest_rank.unwrap()),
             captures,
             check,
             mate,
@@ -729,10 +718,10 @@ impl Move {
         let source = self.source(position)?;
         let destionation = self.destination(position)?;
         let mut bytes = vec![
-            b'a' + source.file() as u8,
-            b'1' + source.rank() as u8,
-            b'a' + destionation.file() as u8,
-            b'1' + destionation.rank() as u8
+            source.file().as_utf8_char(),
+            source.rank().as_utf8_char(),
+            destionation.file().as_utf8_char(),
+            destionation.rank().as_utf8_char()
         ];
 
         if let Move::Promotion { promotion, .. } = self {
@@ -1343,8 +1332,7 @@ where
             Player::Black => BLACK_EN_PASSANT_TARGET_RANK
         };
         let en_passant_target_location =
-            Location::from_file_and_rank(en_passant_file, en_passant_rank)
-                .unwrap();
+            Location::from_file_and_rank(en_passant_file, en_passant_rank);
 
         Bitboard::singleton(en_passant_target_location)
     }

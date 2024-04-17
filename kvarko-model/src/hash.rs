@@ -8,7 +8,7 @@ use rand::distributions::Standard;
 use rand::prelude::Distribution;
 use rand::rngs::StdRng;
 
-use crate::board::{Location, BOARD_WIDTH, BOARD_HEIGHT, Bitboard};
+use crate::board::{Location, BOARD_WIDTH, BOARD_HEIGHT, Bitboard, File};
 use crate::piece::{Piece, PIECE_COUNT};
 use crate::player::{Player, PLAYER_COUNT, PLAYERS};
 use crate::state::{Position, PositionId};
@@ -79,18 +79,16 @@ pub trait PositionHasher {
     ///
     /// # Arguments
     ///
-    /// * `file`: The 0-based index of the file on which capturing en passant
-    /// is now available.
-    fn on_en_passant_enabled(&mut self, file: usize);
+    /// * `file`: The [File] on which capturing en passant is now available.
+    fn on_en_passant_enabled(&mut self, file: File);
 
     /// Notification that capturing en-passant became unavailable on a given
     /// file of the board.
     ///
     /// # Arguments
     ///
-    /// * `previous_file`: The 0-based index of the file on which capturing en
-    /// passant is no longer available.
-    fn on_en_passant_disabled(&mut self, previous_file: usize);
+    /// * `previous_file`: The [File] on which capturing en passant is no longer available.
+    fn on_en_passant_disabled(&mut self, previous_file: File);
 
     /// Notification that a player lost one right to castle, that is, on one
     /// side.
@@ -151,8 +149,8 @@ where
             self.piece_hashes[player as usize][piece as usize][location.0];
     }
 
-    fn toggle_en_passant(&mut self, file: usize) {
-        self.current_hash ^= self.en_passant_hashes[file];
+    fn toggle_en_passant(&mut self, file: File) {
+        self.current_hash ^= self.en_passant_hashes[file.as_usize()];
     }
 
     fn toggle_castling_right(&mut self, player: Player, long: bool) {
@@ -271,11 +269,11 @@ where
         self.toggle_piece(piece, player, location);
     }
 
-    fn on_en_passant_enabled(&mut self, file: usize) {
+    fn on_en_passant_enabled(&mut self, file: File) {
         self.toggle_en_passant(file);
     }
 
-    fn on_en_passant_disabled(&mut self, previous_file: usize) {
+    fn on_en_passant_disabled(&mut self, previous_file: File) {
         self.toggle_en_passant(previous_file);
     }
 
@@ -313,9 +311,9 @@ impl PositionHasher for IdHasher {
 
     fn on_piece_left(&mut self, _: Piece, _: Player, _: Location) { }
 
-    fn on_en_passant_enabled(&mut self, _: usize) { }
+    fn on_en_passant_enabled(&mut self, _: File) { }
 
-    fn on_en_passant_disabled(&mut self, _: usize) { }
+    fn on_en_passant_disabled(&mut self, _: File) { }
 
     fn on_castling_right_lost(&mut self, _: Player, _: bool) { }
 
