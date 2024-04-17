@@ -54,7 +54,7 @@ fn load_opening_book() -> Option<OpeningBook> {
 
 const MIN_FROM_TOTAL: f64 = 0.005;
 const MAX_FROM_TOTAL: f64 = 0.05;
-const FROM_INCREMENT: f64 = 0.5;
+const FROM_INCREMENT: f64 = 0.75;
 const MILLIS_TO_SECS: f64 = 0.001;
 
 fn compute_deepen_for(total: Milliseconds, increment: Milliseconds) -> Duration {

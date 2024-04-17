@@ -15,7 +15,7 @@ use ggez::graphics::{
     Text
 };
 
-use kvarko_model::board::{self, Location};
+use kvarko_model::board::{self, File, Location, Rank};
 use kvarko_model::game::{Controller, Observer};
 use kvarko_model::hash::ZobristHasher;
 use kvarko_model::movement::{self, Move};
@@ -128,9 +128,9 @@ pub struct GameplayState {
     piece_offset_x: f32,
     piece_offset_y: f32,
     piece_scale: f32,
-    dragged_piece: Option<(usize, usize)>,
+    dragged_piece: Option<(File, Rank)>,
     dragged_piece_location: Option<(f32, f32)>,
-    highlighted_squares: HashSet<(usize, usize)>,
+    highlighted_squares: HashSet<(File, Rank)>,
     legal_moves: Vec<Move>,
     awaiting_moves: Option<Vec<Move>>,
     outcome: Option<Outcome>,
@@ -195,14 +195,14 @@ impl GameplayState {
     }
 
     fn get_mouse_field(&mut self, mouse_x: f32, mouse_y: f32)
-            -> (usize, usize) {
+            -> Option<(File, Rank)> {
         let file_f = (mouse_x - self.board_start_x) / self.field_width;
         let rank_f = (self.board_start_y - mouse_y) / self.field_height;
 
-        let file = file_f.floor() as usize;
-        let rank = rank_f.floor() as usize;
+        let file_usize = file_f.floor() as usize;
+        let rank_usize = rank_f.floor() as usize;
 
-        (file, rank)
+        File::from_usize(file_usize).zip(Rank::from_usize(rank_usize))
     }
 
     fn make_move(&mut self, mov: Move) {
@@ -236,14 +236,14 @@ impl EventHandler for GameplayState {
 
         let board = self.game_state.position().board();
 
-        for rank in 0..board::BOARD_HEIGHT {
+        for rank in Rank::RANKS {
             let rank_y =
-                self.board_start_y - (rank + 1) as f32 * self.field_height;
+                self.board_start_y - (rank.as_usize() + 1) as f32 * self.field_height;
 
-            for file in 0..board::BOARD_WIDTH {
+            for file in File::FILES {
                 let file_x =
-                    self.board_start_x + file as f32 * self.field_width;
-                let color = if (rank + file) % 2 == 0 {
+                    self.board_start_x + file.as_usize() as f32 * self.field_width;
+                let color = if (rank.as_usize() + file.as_usize()) % 2 == 0 {
                     DARK_COLOR
                 }
                 else {
@@ -269,8 +269,7 @@ impl EventHandler for GameplayState {
                     continue;
                 }
 
-                let location =
-                    Location::from_file_and_rank(file, rank).unwrap();
+                let location = Location::from_file_and_rank(file, rank);
                 let piece = board.piece_at(location);
 
                 if let Some(piece) = piece {
@@ -286,7 +285,7 @@ impl EventHandler for GameplayState {
         }
 
         if let Some((file, rank)) = self.dragged_piece {
-            let location = Location::from_file_and_rank(file, rank).unwrap();
+            let location = Location::from_file_and_rank(file, rank);
             let piece = board.piece_at(location);
 
             if let Some(piece) = piece {
@@ -309,18 +308,16 @@ impl EventHandler for GameplayState {
             return;
         }
 
-        let (file, rank) = self.get_mouse_field(x, y);
+        if let Some((file, rank)) = self.get_mouse_field(x, y) {
+            for m in &self.legal_moves {
+                let src = m.source(self.game_state.position()).unwrap();
+                let dest = m.destination(self.game_state.position()).unwrap();
 
-        for m in &self.legal_moves {
-            let src = m.source(self.game_state.position()).unwrap();
-            let dest = m.destination(self.game_state.position()).unwrap();
-
-            if src.file() == file && src.rank() == rank {
-                self.highlighted_squares.insert((dest.file(), dest.rank()));
+                if src.file() == file && src.rank() == rank {
+                    self.highlighted_squares.insert((dest.file(), dest.rank()));
+                }
             }
-        }
 
-        if file < board::BOARD_WIDTH && rank < board::BOARD_HEIGHT {
             self.dragged_piece = Some((file, rank));
             self.set_dragged_piece_location(x, y);
         }
@@ -341,28 +338,29 @@ impl EventHandler for GameplayState {
 
         if x >= self.board_start_x && y <= self.board_start_y {
             if let Some((src_file, src_rank)) = self.dragged_piece {
-                let (dest_file, dest_rank) = self.get_mouse_field(x, y);
-                let moves = self.legal_moves.iter()
-                    .filter(|m| {
-                        let src = m.source(self.game_state.position())
-                            .unwrap();
-                        let dest = m.destination(self.game_state.position())
-                            .unwrap();
+                if let Some((dest_file, dest_rank)) = self.get_mouse_field(x, y) {
+                    let moves = self.legal_moves.iter()
+                        .filter(|m| {
+                            let src = m.source(self.game_state.position())
+                                .unwrap();
+                            let dest = m.destination(self.game_state.position())
+                                .unwrap();
 
-                        src.file() == src_file && src.rank() == src_rank &&
-                        dest.file() == dest_file && dest.rank() == dest_rank
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
+                            src.file() == src_file && src.rank() == src_rank &&
+                                dest.file() == dest_file && dest.rank() == dest_rank
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>();
 
-                match moves.len() {
-                    1 => {
-                        self.make_move(moves.into_iter().next().unwrap());
-                    },
-                    2.. => {
-                        self.awaiting_moves = Some(moves);
-                    },
-                    _ => { }
+                    match moves.len() {
+                        1 => {
+                            self.make_move(moves.into_iter().next().unwrap());
+                        },
+                        2.. => {
+                            self.awaiting_moves = Some(moves);
+                        },
+                        _ => { }
+                    }
                 }
             }
         }

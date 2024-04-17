@@ -1,7 +1,7 @@
 //! This module defines the [Board] data structure, which stores the state of a
 //! Chess board, i.e. the pieces on the squares.
 
-use crate::error::{FenError, FenResult, LocationError, LocationResult};
+use crate::error::{FenError, FenResult};
 use crate::movement::Move;
 use crate::piece::{PIECE_COUNT, Piece, PIECES};
 use crate::player::{PLAYER_COUNT, Player, PLAYERS};
@@ -9,6 +9,8 @@ use crate::player::{PLAYER_COUNT, Player, PLAYERS};
 use serde::{Deserialize, Serialize};
 
 use std::cmp::Ordering;
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use std::ops::{
     BitAnd,
     BitAndAssign,
@@ -25,20 +27,256 @@ use std::ops::{
     SubAssign
 };
 
+/// Represents a file (column of fields) on the Chess board. Can be converted to and from 0-based
+/// file indices using [File::from_usize] and [File::as_usize].
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct File(usize);
+
+impl File {
+
+    /// The A-file with (index 0, queen-side rook file).
+    pub const A: File = File(0);
+
+    /// The B-file with (index 1, queen-side knight file).
+    pub const B: File = File(1);
+
+    /// The C-file with (index 2, queen-side bishop file).
+    pub const C: File = File(2);
+
+    /// The D-file with (index 3, queen file).
+    pub const D: File = File(3);
+
+    /// The E-file with (index 4, king file).
+    pub const E: File = File(4);
+
+    /// The F-file with (index 5, king-side bishop file).
+    pub const F: File = File(5);
+
+    /// The G-file with (index 6, king-side knight file).
+    pub const G: File = File(6);
+
+    /// The H-file with (index 7, king-side rook file).
+    pub const H: File = File(7);
+
+    /// An array of all files from A to H (indices 0 to 7, queen-side rook to king-side rook files).
+    pub const FILES: [File; BOARD_WIDTH] = [
+        File::A,
+        File::B,
+        File::C,
+        File::D,
+        File::E,
+        File::F,
+        File::G,
+        File::H
+    ];
+
+    /// Converts this file to its 0-based index starting at the A-file (A = 0, B = 1, ...).
+    ///
+    /// # Returns
+    ///
+    /// The 0-based index of this file as a [usize].
+    pub const fn as_usize(self) -> usize {
+        self.0
+    }
+
+    /// Constructs a file from its 0-based index starting at the A-file (0 = A, 1 = B, ...).
+    ///
+    /// # Arguments
+    ///
+    /// * `file`: The 0-based index of the file to construct. Must be in the range 0 to 7 to yield a
+    /// result.
+    ///
+    /// # Returns
+    ///
+    /// `Some(...)` with the file with the given index, if it is in the valid range, and `None`
+    /// otherwise.
+    pub const fn from_usize(file: usize) -> Option<File> {
+        if file < BOARD_WIDTH {
+            Some(File(file))
+        }
+        else {
+            None
+        }
+    }
+
+    /// Gets the lowercase letter representing this file.
+    ///
+    /// # Returns
+    ///
+    /// A [char] containing the lowercase letter representing this file (`'a'`, `'b'`, ..., `'h'`).
+    pub fn as_char(self) -> char {
+        char::from_u32('a' as u32 + self.0 as u32).unwrap()
+    }
+
+    /// Gets the lowercase letter representing this file as a UTF-8 byte.
+    ///
+    /// # Returns
+    ///
+    /// A [u8] that constitutes the UTF-8 representation of the lowercase letter representing this
+    /// file (`b'a'`, `b'b'`, ..., `b'h'`).
+    pub const fn as_utf8_char(self) -> u8 {
+        b'a' + self.0 as u8
+    }
+
+    /// Parses a file from its lowercase letter.
+    ///
+    /// # Arguments
+    ///
+    /// * `file`: A character containing the lowercase letter representing the file to return
+    /// (`'a'`, `'b'`, ..., `'h'`).
+    ///
+    /// # Returns
+    ///
+    /// `Some(...)` with the file represented by the given letter, if it is in the valid range, and
+    /// `None` otherwise.
+    pub const fn from_char(file: char) -> Option<File> {
+        if file >= 'a' {
+            File::from_usize(file as usize - 'a' as usize)
+        }
+        else {
+            None
+        }
+    }
+}
+
+impl Display for File {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_char())
+    }
+}
+
+/// Represents a rank (row of fields) on the Chess board. Can be converted to and from 0-based rank
+/// indices using [Rank::from_usize] and [Rank::as_usize].
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct Rank(usize);
+
+impl Rank {
+
+    /// The first rank (index 0, initially containing White's non-pawn pieces).
+    pub const R1: Rank = Rank(0);
+
+    /// The second rank (index 1, initially containing White's pawns).
+    pub const R2: Rank = Rank(1);
+
+    /// The third rank (index 2, initially the rank in front of White's pawns).
+    pub const R3: Rank = Rank(2);
+
+    /// The fourth rank (index 3, initially the central rank leaning towards White).
+    pub const R4: Rank = Rank(3);
+
+    /// The fifth rank (index 4, initially the central rank leaning towards Black).
+    pub const R5: Rank = Rank(4);
+
+    /// The sixth rank (index 5, initially the rank in front of Black's pawns).
+    pub const R6: Rank = Rank(5);
+
+    /// The seventh rank (index 6, initially containing Black's pawns).
+    pub const R7: Rank = Rank(6);
+
+    /// The eighth rank (index 7, initially containing Black's non-pawn pieces).
+    pub const R8: Rank = Rank(7);
+
+    /// An array of all ranks from 1st to 8th (indices 0 to 7, White's side to Black's side).
+    pub const RANKS: [Rank; BOARD_HEIGHT] = [
+        Rank::R1,
+        Rank::R2,
+        Rank::R3,
+        Rank::R4,
+        Rank::R5,
+        Rank::R6,
+        Rank::R7,
+        Rank::R8
+    ];
+
+    /// Converts this rank to its 0-based index starting at the first rank (1st = 0, 2nd = 1, ...).
+    ///
+    /// # Returns
+    ///
+    /// The 0-based index of this rank as a [usize].
+    pub const fn as_usize(self) -> usize {
+        self.0
+    }
+
+    /// Constructs a rank from its 0-based index starting at the first rank (0 = 1st, 1 = 2nd, ...).
+    ///
+    /// # Arguments
+    ///
+    /// * `rank`: The 0-based index of the rank to construct. Must be in the range 0 to 7 to yield a
+    /// result.
+    ///
+    /// # Returns
+    ///
+    /// `Some(...)` with the rank with the given index, if it is in the valid range, and `None`
+    /// otherwise.
+    pub const fn from_usize(rank: usize) -> Option<Rank> {
+        if rank < BOARD_HEIGHT {
+            Some(Rank(rank))
+        }
+        else {
+            None
+        }
+    }
+
+    /// Gets the digit representing this rank.
+    ///
+    /// # Returns
+    ///
+    /// A [char] containing the digit representing this rank (`'1'`, `'2'`, ..., `'8'`).
+    pub fn as_char(self) -> char {
+        char::from_u32('1' as u32 + self.0 as u32).unwrap()
+    }
+
+    /// Gets the digit representing this rank as a UTF-8 byte.
+    ///
+    /// # Returns
+    ///
+    /// A [u8] that constitutes the UTF-8 representation of the digit representing this rank
+    /// (`b'1'`, `b'2'`, ..., `b'8'`).
+    pub const fn as_utf8_char(self) -> u8 {
+        b'1' + self.0 as u8
+    }
+
+    /// Parses a rank from its digit.
+    ///
+    /// # Arguments
+    ///
+    /// * `rank`: A character containing the digit representing the rank to return (`'1'`, `'2'`,
+    /// ..., `'8'`).
+    ///
+    /// # Returns
+    ///
+    /// `Some(...)` with the rank represented by the given digit, if it is in the valid range, and
+    /// `None` otherwise.
+    pub const fn from_char(rank: char) -> Option<Rank> {
+        if rank >= '1' {
+            Rank::from_usize(rank as usize - '1' as usize)
+        }
+        else {
+            None
+        }
+    }
+}
+
+impl Display for Rank {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_char())
+    }
+}
+
 /// Represents the location of a single square on the board as an index.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Location(pub(crate) usize);
 
 impl Location {
 
-    /// Gets the 0-based index of the file (column) in which this square lies.
-    pub fn file(self) -> usize {
-        self.0 % BOARD_WIDTH
+    /// Gets the 0-based index of the [File] (column) in which this square lies.
+    pub fn file(self) -> File {
+        File::from_usize(self.0 % BOARD_WIDTH).unwrap()
     }
 
-    /// Gets the 0-based index of the rank (row) on which this square lies.
-    pub fn rank(self) -> usize {
-        self.0 / BOARD_WIDTH
+    /// Gets the 0-based index of the [Rank] (row) on which this square lies.
+    pub fn rank(self) -> Rank {
+        Rank::from_usize(self.0 / BOARD_WIDTH).unwrap()
     }
 
     /// Creates a new location that represents the square in the given file and
@@ -46,41 +284,20 @@ impl Location {
     ///
     /// # Arguments
     ///
-    /// * `file`: The 0-based index of the file (starting with the A-file) of
-    /// the square for which to construct a location. Must be less than
-    /// [BOARD_WIDTH].
-    /// * `rank`: The 0-based index of the rank (starting with rank 1) of the
-    /// square for which to construct a location. Must be less than
-    /// [BOARD_HEIGHT].
+    /// * `file`: The [File] of the square for which to construct a location.
+    /// * `rank`: The [Rank] of the square for which to construct a location.
     ///
     /// # Returns
     ///
     /// A new location representing the square at the given file and rank.
-    ///
-    /// # Errors
-    ///
-    /// * [LocationError::FileOutOfBounds] if `file` is too large, i.e. greater
-    /// than or equal to [BOARD_WIDTH].
-    /// * [LocationError::RankOutOfBounds] if `rank` is too large, i.e. greater
-    /// than or equal to [BOARD_HEIGHT].
-    pub fn from_file_and_rank<F, R>(file: F, rank: R)
-        -> LocationResult<Location>
-    where
-        F: Into<usize>,
-        R: Into<usize>
-    {
-        let file = file.into();
-        let rank = rank.into();
+    pub fn from_file_and_rank(file: File, rank: Rank) -> Location {
+        Location(rank.as_usize() * BOARD_WIDTH + file.as_usize())
+    }
+}
 
-        if file >= BOARD_WIDTH {
-            Err(LocationError::FileOutOfBounds)
-        }
-        else if rank >= BOARD_HEIGHT {
-            Err(LocationError::RankOutOfBounds)
-        }
-        else {
-            Ok(Location(rank * BOARD_WIDTH + file))
-        }
+impl Display for Location {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{}", self.file(), self.rank())
     }
 }
 
