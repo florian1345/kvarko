@@ -301,6 +301,12 @@ impl Display for Location {
     }
 }
 
+impl From<(File, Rank)> for Location {
+    fn from((file, rank): (File, Rank)) -> Location {
+        Location::from_file_and_rank(file, rank)
+    }
+}
+
 /// An [Iterator] over [Location]s of the squares contained in a [Bitboard].
 pub struct BitboardLocationIter {
     bitboard: Bitboard
@@ -384,6 +390,28 @@ impl Bitboard {
     /// A new bitboard which contains `location` and nothing else.
     pub fn singleton(location: Location) -> Bitboard {
         Bitboard(1 << location.0)
+    }
+
+    /// Creates a new bitboards which contains all fields specified by the given iterable.
+    ///
+    /// # Arguments
+    ///
+    /// * `locations`: An [IntoIterator] whose items implement [Into] for [Location]. Each item is
+    /// converted into a [Location] and added to the resulting bitboard.
+    ///
+    /// # Returns
+    ///
+    /// A new bitboard which contains the given `locations` and nothing else.
+    pub fn of_locations<L, I>(locations: I) -> Bitboard
+    where
+        L: Into<Location>,
+        I: IntoIterator<Item = L>
+    {
+        locations.into_iter()
+            .map(L::into)
+            .map(Bitboard::singleton)
+            .reduce(Bitboard::bitor)
+            .unwrap_or(Bitboard::EMPTY)
     }
 
     /// Gets the number of fields contained in this bitboard.
@@ -1046,6 +1074,10 @@ impl Board {
 #[cfg(test)]
 mod tests {
 
+    use kernal::prelude::*;
+
+    use rstest::rstest;
+
     use super::*;
 
     #[test]
@@ -1104,6 +1136,25 @@ mod tests {
                 Bitboard(0x100),
                 Bitboard(0x8000000000000000)],
             locations);
+    }
+
+    #[rstest]
+    #[case::empty(vec![], Bitboard(0))]
+    #[case::single(
+        vec![(File::A, Rank::R1)],
+        Bitboard(1))]
+    #[case::multiple(
+        vec![(File::A, Rank::R1), (File::B, Rank::R1)],
+        Bitboard(3))]
+    #[case::repeats(
+        vec![(File::B, Rank::R1), (File::C, Rank::R1), (File::B, Rank::R1)],
+        Bitboard(6))]
+    fn bitboard_from_multiple_locations(
+            #[case] locations: Vec<(File, Rank)>,
+            #[case] expected: Bitboard) {
+        let actual = Bitboard::of_locations(locations);
+
+        assert_that!(actual).is_equal_to(expected);
     }
 
     const INITIAL_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
