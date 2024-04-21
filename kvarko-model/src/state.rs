@@ -1125,6 +1125,8 @@ mod tests {
 
     use super::*;
 
+    use crate::board::locations::*;
+
     const UNSET: usize = 1337;
 
     fn test_move(fen: &str, mov: Move, assertions: impl Fn(&State<IdHasher>)) {
@@ -1168,7 +1170,7 @@ mod tests {
         let mov = Move::Ordinary {
             moved: Piece::Knight,
             captured: None,
-            delta_mask: Bitboard(0x0000000000040002)
+            delta_mask: Bitboard::of([B1, C3])
         };
 
         test_move(fen, mov, |state| {
@@ -1206,7 +1208,7 @@ mod tests {
         let mov = Move::Ordinary {
             moved: Piece::Pawn,
             captured: None,
-            delta_mask: Bitboard(0x0000000000080800)
+            delta_mask: Bitboard::of([D2, D3])
         };
 
         test_move(fen, mov, |state| {
@@ -1243,7 +1245,7 @@ mod tests {
         let mov = Move::Promotion {
             promotion: Piece::Queen,
             captured: None,
-            delta_mask: Bitboard(0x0808000000000000)
+            delta_mask: Bitboard::of([D7, D8])
         };
 
         test_move(fen, mov, |state| {
@@ -1280,7 +1282,7 @@ mod tests {
         let mov = Move::Ordinary {
             moved: Piece::Bishop,
             captured: Some(Piece::Bishop),
-            delta_mask: Bitboard(0x0000000400100000)
+            delta_mask: Bitboard::of([C5, E3])
         };
 
         test_move(fen, mov, |state| {
@@ -1311,14 +1313,14 @@ mod tests {
         // └───┴───┴───┴───┴───┴───┴───┴───┘
         //
         // White castles short, resetting reversible history (used internally)
-        // but no the fifty-move-clock (which is a Chess rule that does not
+        // but not the fifty-move-clock (which is a Chess rule that does not
         // consider castling as an irreversible move).
 
         let fen = "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2N2N2/PPPP1PPP/R1BQK2R \
             w KQkq - 6 5";
         let mov = Move::Castle {
-            king_delta_mask: Bitboard(0x0000000000000050),
-            rook_delta_mask: Bitboard(0x00000000000000a0)
+            king_delta_mask: Bitboard::of([E1, G1]),
+            rook_delta_mask: Bitboard::of([H1, F1])
         };
 
         test_move(fen, mov, |state| {
@@ -1354,8 +1356,8 @@ mod tests {
         let fen = "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2N2N2/PPPP1PPP/R1BQ1RK1 \
             b kq - 7 6";
         let mov = Move::Castle {
-            king_delta_mask: Bitboard(0x5000000000000000),
-            rook_delta_mask: Bitboard(0xa000000000000000)
+            king_delta_mask: Bitboard::of([E8, G8]),
+            rook_delta_mask: Bitboard::of([H8, F8])
         };
 
         test_move(fen, mov, |state| {
@@ -1395,7 +1397,7 @@ mod tests {
         let mov = Move::Ordinary {
             moved: Piece::Rook,
             captured: None,
-            delta_mask: Bitboard(0x00000000000000a0)
+            delta_mask: Bitboard::of([H1, F1])
         };
 
         test_move(fen, mov, |state| {
@@ -1432,7 +1434,7 @@ mod tests {
         let mov = Move::Ordinary {
             moved: Piece::Bishop,
             captured: Some(Piece::Rook),
-            delta_mask: Bitboard(0x0100000800000000)
+            delta_mask: Bitboard::of([D5, A8])
         };
 
         test_move(fen, mov, |state| {
@@ -1469,7 +1471,7 @@ mod tests {
         let mov = Move::Promotion {
             promotion: Piece::Knight,
             captured: Some(Piece::Rook),
-            delta_mask: Bitboard(0x0000000000004080)
+            delta_mask: Bitboard::of([G2, H1])
         };
 
         test_move(fen, mov, |state| {
@@ -1507,7 +1509,7 @@ mod tests {
         let mov = Move::Ordinary {
             moved: Piece::King,
             captured: None,
-            delta_mask: Bitboard(0x0000000000000030)
+            delta_mask: Bitboard::of([E1, F1])
         };
 
         test_move(fen, mov, |state| {
@@ -1543,7 +1545,7 @@ mod tests {
         let mov = Move::Ordinary {
             moved: Piece::Pawn,
             captured: None,
-            delta_mask: Bitboard(0x0000000008000800)
+            delta_mask: Bitboard::of([D2, D4])
         };
 
         test_move(fen, mov, |state| {
@@ -1578,7 +1580,7 @@ mod tests {
         let mov = Move::Ordinary {
             moved: Piece::Pawn,
             captured: None,
-            delta_mask: Bitboard(0x0020002000000000)
+            delta_mask: Bitboard::of([F7, F5])
         };
 
         test_move(fen, mov, |state| {
@@ -1613,7 +1615,7 @@ mod tests {
         let mov = Move::Ordinary {
             moved: Piece::Knight,
             captured: None,
-            delta_mask: Bitboard(0x4000200000000000)
+            delta_mask: Bitboard::of([G8, F6])
         };
 
         test_move(fen, mov, |state| {
@@ -1649,7 +1651,7 @@ mod tests {
         let mov = Move::Ordinary {
             moved: Piece::Queen,
             captured: Some(Piece::Pawn),
-            delta_mask: Bitboard(0x0020008000000000)
+            delta_mask: Bitboard::of([H5, F7])
         };
 
         test_move(fen, mov, |state| {
@@ -1694,7 +1696,7 @@ mod tests {
         let mov = Move::Ordinary {
             moved: Piece::Knight,
             captured: None,
-            delta_mask: Bitboard(0x0200010000000000)
+            delta_mask: Bitboard::of([A6, B8])
         };
         
         assert_eq!(None, state.compute_outcome());
@@ -1733,7 +1735,7 @@ mod tests {
         let mov = Move::Ordinary {
             moved: Piece::King,
             captured: None,
-            delta_mask: Bitboard(0x0000000000180000)
+            delta_mask: Bitboard::of([D3, E3])
         };
 
         assert_eq!(None, state.compute_outcome());
