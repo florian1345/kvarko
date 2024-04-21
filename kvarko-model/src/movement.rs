@@ -1506,6 +1506,7 @@ mod tests {
 
     use std::fmt::Debug;
 
+    use crate::board::locations::*;
     use crate::hash::IdHasher;
     use crate::state::State;
 
@@ -1555,10 +1556,11 @@ mod tests {
         // │   │   │ X │ X │   │ X │   │ R │
         // └───┴───┴───┴───┴───┴───┴───┴───┘
 
-        let occupancy = Bitboard(0x00001080080400ac);
-        let attack = get_rook_attack(occupancy, Location(7));
+        let occupancy = Bitboard::of([C1, D1, F1, H1, C3, D4, H5, E6]);
+        let attack = get_rook_attack(occupancy, H1);
 
-        assert_eq!(Bitboard(0x0000008080808060), attack);
+        let expected_attack = Bitboard::of([F1, G1, H2, H3, H4, H5]);
+        assert_eq!(expected_attack, attack);
     }
 
     #[test]
@@ -1582,10 +1584,11 @@ mod tests {
         // │   │   │   │ X │   │   │   │ X │
         // └───┴───┴───┴───┴───┴───┴───┴───┘
 
-        let occupancy = Bitboard(0x0000104a08244888);
-        let attack = get_rook_attack(occupancy, Location(35));
+        let occupancy = Bitboard::of([D1, H1, D2, G2, C3, F3, D4, B5, D5, G5, E6]);
+        let attack = get_rook_attack(occupancy, D5);
 
-        assert_eq!(Bitboard(0x0808087608000000), attack);
+        let expected_attack = Bitboard::of([D4, B5, C5, E5, F5, G5, D6, D7, D8]);
+        assert_eq!(expected_attack, attack);
     }
 
     #[test]
@@ -1609,10 +1612,11 @@ mod tests {
         // │   │   │   │   │   │   │   │ X │
         // └───┴───┴───┴───┴───┴───┴───┴───┘
 
-        let occupancy = Bitboard(0x8000104208040080);
-        let attack = get_bishop_attack(occupancy, Location(63));
+        let occupancy = Bitboard::of([H1, C3, D4, B5, G5, E6, H8]);
+        let attack = get_bishop_attack(occupancy, H8);
 
-        assert_eq!(Bitboard(0x0040201008000000), attack);
+        let expected_attack = Bitboard::of([D4, E5, F6, G7]);
+        assert_eq!(expected_attack, attack);
     }
 
     #[test]
@@ -1636,10 +1640,11 @@ mod tests {
         // │   │   │   │   │   │   │   │ X │
         // └───┴───┴───┴───┴───┴───┴───┴───┘
 
-        let occupancy = Bitboard(0x0100844818040480);
-        let attack = get_bishop_attack(occupancy, Location(28));
+        let occupancy = Bitboard::of([H1, C2, C3, D4, E4, D5, G5, C6, E6, A8]);
+        let attack = get_bishop_attack(occupancy, E4);
 
-        assert_eq!(Bitboard(0x0080402800284480), attack);
+        let expected_attack = Bitboard::of([H1, C2, G2, D3, F3, D5, F5, G6, H7]);
+        assert_eq!(expected_attack, attack);
     }
 
     #[test]
@@ -1741,27 +1746,27 @@ mod tests {
 
         let fen = "8/2k1P3/5n1p/6p1/p4P2/P5K1/6P1/4R3 w - -";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e7 = list_moves_from(&position, Location(52));
+        let moves_from_e7 = list_moves_from(&position, E7);
         let expected_moves = vec![
             Move::Promotion {
                 promotion: Piece::Knight,
                 captured: None,
-                delta_mask: Bitboard(0x1010000000000000)
+                delta_mask: Bitboard::of([E7, E8])
             },
             Move::Promotion {
                 promotion: Piece::Bishop,
                 captured: None,
-                delta_mask: Bitboard(0x1010000000000000)
+                delta_mask: Bitboard::of([E7, E8])
             },
             Move::Promotion {
                 promotion: Piece::Rook,
                 captured: None,
-                delta_mask: Bitboard(0x1010000000000000)
+                delta_mask: Bitboard::of([E7, E8])
             },
             Move::Promotion {
                 promotion: Piece::Queen,
                 captured: None,
-                delta_mask: Bitboard(0x1010000000000000)
+                delta_mask: Bitboard::of([E7, E8])
             }
         ];
 
@@ -1793,27 +1798,27 @@ mod tests {
 
         let fen = "3nk3/4P3/7p/6p1/p4P2/P5K1/6P1/4R3 w - -";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e7 = list_moves_from(&position, Location(52));
+        let moves_from_e7 = list_moves_from(&position, E7);
         let expected_moves = vec![
             Move::Promotion {
                 promotion: Piece::Knight,
                 captured: Some(Piece::Knight),
-                delta_mask: Bitboard(0x0810000000000000)
+                delta_mask: Bitboard::of([E7, D8])
             },
             Move::Promotion {
                 promotion: Piece::Bishop,
                 captured: Some(Piece::Knight),
-                delta_mask: Bitboard(0x0810000000000000)
+                delta_mask: Bitboard::of([E7, D8])
             },
             Move::Promotion {
                 promotion: Piece::Rook,
                 captured: Some(Piece::Knight),
-                delta_mask: Bitboard(0x0810000000000000)
+                delta_mask: Bitboard::of([E7, D8])
             },
             Move::Promotion {
                 promotion: Piece::Queen,
                 captured: Some(Piece::Knight),
-                delta_mask: Bitboard(0x0810000000000000)
+                delta_mask: Bitboard::of([E7, D8])
             }
         ];
 
@@ -1846,29 +1851,29 @@ mod tests {
 
         let fen = "3b1q2/4P3/2k4p/6p1/p4P2/P5K1/6P1/4R3 w - -";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e7 = list_moves_from(&position, Location(52));
+        let moves_from_e7 = list_moves_from(&position, E7);
         let expected_moves = vec![
             // 4 promotions to the left, taking the bishop
 
             Move::Promotion {
                 promotion: Piece::Knight,
                 captured: Some(Piece::Bishop),
-                delta_mask: Bitboard(0x0810000000000000)
+                delta_mask: Bitboard::of([E7, D8])
             },
             Move::Promotion {
                 promotion: Piece::Bishop,
                 captured: Some(Piece::Bishop),
-                delta_mask: Bitboard(0x0810000000000000)
+                delta_mask: Bitboard::of([E7, D8])
             },
             Move::Promotion {
                 promotion: Piece::Rook,
                 captured: Some(Piece::Bishop),
-                delta_mask: Bitboard(0x0810000000000000)
+                delta_mask: Bitboard::of([E7, D8])
             },
             Move::Promotion {
                 promotion: Piece::Queen,
                 captured: Some(Piece::Bishop),
-                delta_mask: Bitboard(0x0810000000000000)
+                delta_mask: Bitboard::of([E7, D8])
             },
 
             // 4 promotions to the right, capturing the queen
@@ -1876,22 +1881,22 @@ mod tests {
             Move::Promotion {
                 promotion: Piece::Knight,
                 captured: Some(Piece::Queen),
-                delta_mask: Bitboard(0x2010000000000000)
+                delta_mask: Bitboard::of([E7, F8])
             },
             Move::Promotion {
                 promotion: Piece::Bishop,
                 captured: Some(Piece::Queen),
-                delta_mask: Bitboard(0x2010000000000000)
+                delta_mask: Bitboard::of([E7, F8])
             },
             Move::Promotion {
                 promotion: Piece::Rook,
                 captured: Some(Piece::Queen),
-                delta_mask: Bitboard(0x2010000000000000)
+                delta_mask: Bitboard::of([E7, F8])
             },
             Move::Promotion {
                 promotion: Piece::Queen,
                 captured: Some(Piece::Queen),
-                delta_mask: Bitboard(0x2010000000000000)
+                delta_mask: Bitboard::of([E7, F8])
             },
 
             // 4 promotions in the center, capturing nothing
@@ -1899,22 +1904,22 @@ mod tests {
             Move::Promotion {
                 promotion: Piece::Knight,
                 captured: None,
-                delta_mask: Bitboard(0x1010000000000000)
+                delta_mask: Bitboard::of([E7, E8])
             },
             Move::Promotion {
                 promotion: Piece::Bishop,
                 captured: None,
-                delta_mask: Bitboard(0x1010000000000000)
+                delta_mask: Bitboard::of([E7, E8])
             },
             Move::Promotion {
                 promotion: Piece::Rook,
                 captured: None,
-                delta_mask: Bitboard(0x1010000000000000)
+                delta_mask: Bitboard::of([E7, E8])
             },
             Move::Promotion {
                 promotion: Piece::Queen,
                 captured: None,
-                delta_mask: Bitboard(0x1010000000000000)
+                delta_mask: Bitboard::of([E7, E8])
             }
         ];
 
@@ -1942,20 +1947,20 @@ mod tests {
         // │ R │ N │ B │ Q │ K │ B │   │ R │
         // └───┴───┴───┴───┴───┴───┴───┴───┘
         //
-        // Pawn on e1 can push only one square, second square is blocked.
+        // Pawn on e2 can push only one square, second square is blocked.
 
         let fen = "rnbqkbnr/pppp1ppp/8/8/2P1p3/5N2/PP1PPPPP/RNBQKB1R w KQkq -";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e1 = list_moves_from(&position, Location(12));
+        let moves_from_e2 = list_moves_from(&position, E2);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::Pawn,
                 captured: None,
-                delta_mask: Bitboard(0x0000000000101000)
+                delta_mask: Bitboard::of([E2, E3])
             }
         ];
 
-        assert_set_equals(expected_moves, moves_from_e1);
+        assert_set_equals(expected_moves, moves_from_e2);
     }
 
     #[test]
@@ -1990,12 +1995,12 @@ mod tests {
             Move::Ordinary {
                 moved: Piece::Bishop,
                 captured: None,
-                delta_mask: Bitboard(0x1000000200000000)
+                delta_mask: Bitboard::of([B5, E8])
             },
             Move::Ordinary {
                 moved: Piece::Rook,
                 captured: None,
-                delta_mask: Bitboard(0x4000000000400000)
+                delta_mask: Bitboard::of([G3, G8])
             }
         ];
 
@@ -2034,12 +2039,12 @@ mod tests {
             Move::Ordinary {
                 moved: Piece::Bishop,
                 captured: Some(Piece::Rook),
-                delta_mask: Bitboard(0x8000000008000000)
+                delta_mask: Bitboard::of([D4, H8])
             },
             Move::Ordinary {
                 moved: Piece::Rook,
                 captured: Some(Piece::Rook),
-                delta_mask: Bitboard(0x8000008000000000)
+                delta_mask: Bitboard::of([H5, H8])
             }
         ];
 
@@ -2073,12 +2078,12 @@ mod tests {
 
         let fen = "r4Rk1/4b1p1/3p3p/p3p3/P3P3/2N4P/6P1/5RK1 b - -";
         let position = Position::from_fen(fen).unwrap();
-        let king_moves = list_moves_from(&position, Location(62));
+        let king_moves = list_moves_from(&position, G8);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x4080000000000000)
+                delta_mask: Bitboard::of([G8, H7])
             }
         ];
 
@@ -2111,17 +2116,17 @@ mod tests {
 
         let fen = "r4Rk1/4b1p1/3p3p/p3p3/P3P3/2N4P/6P1/6K1 b - -";
         let position = Position::from_fen(fen).unwrap();
-        let king_moves = list_moves_from(&position, Location(62));
+        let king_moves = list_moves_from(&position, G8);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x4080000000000000)
+                delta_mask: Bitboard::of([G8, H7])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: Some(Piece::Rook),
-                delta_mask: Bitboard(0x6000000000000000)
+                delta_mask: Bitboard::of([G8, F8])
             },
         ];
 
@@ -2159,17 +2164,17 @@ mod tests {
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000000010100000)
+                delta_mask: Bitboard::of([E3, E4])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000001010000000)
+                delta_mask: Bitboard::of([E4, E5])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000002010000000)
+                delta_mask: Bitboard::of([E4, F5])
             }
         ];
 
@@ -2208,21 +2213,21 @@ mod tests {
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000002020000000)
+                delta_mask: Bitboard::of([F5, F4])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000003000000000)
+                delta_mask: Bitboard::of([F5, E5])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000402000000000)
+                delta_mask: Bitboard::of([F5, G6])
             },
             Move::EnPassant { 
-                delta_mask: Bitboard(0x0000000008100000),
-                target: Bitboard(0x0000000010000000)
+                delta_mask: Bitboard::of([D4, E3]),
+                target: Bitboard::singleton(E4)
             }
         ];
 
@@ -2269,8 +2274,8 @@ mod tests {
         let moves = list_moves(&position).0;
         let expected_moves = vec![
             Move::EnPassant { 
-                delta_mask: Bitboard(0x0000100800000000),
-                target: Bitboard(0x0000001000000000)
+                delta_mask: Bitboard::of([D5, E6]),
+                target: Bitboard::singleton(E5)
             }
         ];
 
@@ -2303,7 +2308,7 @@ mod tests {
 
         let fen = "k7/8/8/8/3K1B1r/8/8/8 w - -";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_f4 = list_moves_from(&position, Location(29));
+        let moves_from_f4 = list_moves_from(&position, F4);
 
         assert!(moves_from_f4.is_empty());
     }
@@ -2334,26 +2339,26 @@ mod tests {
 
         let fen = "1Q6/8/3b4/P7/1P3kr1/6p1/8/2K5 b - -";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_f4 = list_moves_from(&position, Location(43));
+        let moves_from_d6 = list_moves_from(&position, D6);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::Bishop,
                 captured: Some(Piece::Queen),
-                delta_mask: Bitboard(0x0200080000000000)
+                delta_mask: Bitboard::of([D6, B8])
             },
             Move::Ordinary {
                 moved: Piece::Bishop,
                 captured: None,
-                delta_mask: Bitboard(0x0004080000000000)
+                delta_mask: Bitboard::of([D6, C7])
             },
             Move::Ordinary {
                 moved: Piece::Bishop,
                 captured: None,
-                delta_mask: Bitboard(0x0000081000000000)
+                delta_mask: Bitboard::of([D6, E5])
             }
         ];
 
-        assert_set_equals(expected_moves, moves_from_f4);
+        assert_set_equals(expected_moves, moves_from_d6);
     }
 
     #[test]
@@ -2382,32 +2387,32 @@ mod tests {
 
         let fen = "r3kr2/p5pp/1p6/3pB3/3N3P/1B1b1R2/P4K2/8 w q -";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_f3 = list_moves_from(&position, Location(21));
+        let moves_from_f3 = list_moves_from(&position, F3);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::Rook,
                 captured: Some(Piece::Rook),
-                delta_mask: Bitboard(0x2000000000200000)
+                delta_mask: Bitboard::of([F3, F8])
             },
             Move::Ordinary {
                 moved: Piece::Rook,
                 captured: None,
-                delta_mask: Bitboard(0x0020000000200000)
+                delta_mask: Bitboard::of([F3, F7])
             },
             Move::Ordinary {
                 moved: Piece::Rook,
                 captured: None,
-                delta_mask: Bitboard(0x0000200000200000)
+                delta_mask: Bitboard::of([F3, F6])
             },
             Move::Ordinary {
                 moved: Piece::Rook,
                 captured: None,
-                delta_mask: Bitboard(0x0000002000200000)
+                delta_mask: Bitboard::of([F3, F5])
             },
             Move::Ordinary {
                 moved: Piece::Rook,
                 captured: None,
-                delta_mask: Bitboard(0x0000000020200000)
+                delta_mask: Bitboard::of([F3, F4])
             }
         ];
 
@@ -2440,17 +2445,17 @@ mod tests {
 
         let fen = "r3k3/p5pp/1p6/3pB3/3N3P/1B1bKR1r/P7/8 w q -";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_f3 = list_moves_from(&position, Location(21));
+        let moves_from_f3 = list_moves_from(&position, F3);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::Rook,
                 captured: Some(Piece::Rook),
-                delta_mask: Bitboard(0x0000000000a00000)
+                delta_mask: Bitboard::of([F3, H3])
             },
             Move::Ordinary {
                 moved: Piece::Rook,
                 captured: None,
-                delta_mask: Bitboard(0x0000000000600000)
+                delta_mask: Bitboard::of([F3, G3])
             }
         ];
 
@@ -2483,7 +2488,7 @@ mod tests {
 
         let fen = "8/2k5/8/4r3/6p1/1B4B1/8/5K2 b - -";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e5 = list_moves_from(&position, Location(36));
+        let moves_from_e5 = list_moves_from(&position, E5);
 
         assert!(moves_from_e5.is_empty());
     }
@@ -2514,17 +2519,17 @@ mod tests {
 
         let fen = "8/2k1r3/8/8/8/3b1p2/1Q2P3/4K3 w - -";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e2 = list_moves_from(&position, Location(12));
+        let moves_from_e2 = list_moves_from(&position, E2);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::Pawn,
                 captured: None,
-                delta_mask: Bitboard(0x0000000000101000)
+                delta_mask: Bitboard::of([E2, E3])
             },
             Move::Ordinary {
                 moved: Piece::Pawn,
                 captured: None,
-                delta_mask: Bitboard(0x0000000010001000)
+                delta_mask: Bitboard::of([E2, E4])
             }
         ];
 
@@ -2552,12 +2557,12 @@ mod tests {
         // │   │   │   │   │   │   │   │   │
         // └───┴───┴───┴───┴───┴───┴───┴───┘
         //
-        // The pawn on e2 is pinned to the king by the rook on h7. It can
+        // The pawn on e2 is pinned to the king by the rook on h2. It can
         // therefore not move.
 
         let fen = "8/2k5/8/8/8/3b1p2/1Q1KP2r/8 w - -";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e2 = list_moves_from(&position, Location(12));
+        let moves_from_e2 = list_moves_from(&position, E2);
 
         assert!(moves_from_e2.is_empty());
     }
@@ -2589,12 +2594,12 @@ mod tests {
 
         let fen = "8/1q3k2/5P2/3p4/2B1R3/8/2K5/8 b - -";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_d5 = list_moves_from(&position, Location(35));
+        let moves_from_d5 = list_moves_from(&position, D5);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::Pawn,
                 captured: Some(Piece::Bishop),
-                delta_mask: Bitboard(0x0000000804000000)
+                delta_mask: Bitboard::of([D5, C4])
             }
         ];
 
@@ -2628,11 +2633,11 @@ mod tests {
 
         let fen = "8/8/7k/8/4Pp1b/6N1/8/2B2K2 b - e3";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_f4 = list_moves_from(&position, Location(29));
+        let moves_from_f4 = list_moves_from(&position, F4);
         let expected_moves = vec![
             Move::EnPassant {
-                delta_mask: Bitboard(0x0000000020100000),
-                target: Bitboard(0x0000000010000000)
+                delta_mask: Bitboard::of([F4, E3]),
+                target: Bitboard::singleton(E4)
             }
         ];
 
@@ -2666,12 +2671,12 @@ mod tests {
 
         let fen = "4r3/5k1p/6p1/4Ppn1/8/1P6/P1P2B2/3RK3 w - f6";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e5 = list_moves_from(&position, Location(36));
+        let moves_from_e5 = list_moves_from(&position, E5);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::Pawn,
                 captured: None,
-                delta_mask: Bitboard(0x0000101000000000)
+                delta_mask: Bitboard::of([E5, E6])
             }
         ];
 
@@ -2705,12 +2710,12 @@ mod tests {
 
         let fen = "2k5/8/8/K2pP2r/8/8/6B1/8 w - d6 0 1";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e5 = list_moves_from(&position, Location(36));
+        let moves_from_e5 = list_moves_from(&position, E5);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::Pawn,
                 captured: None,
-                delta_mask: Bitboard(0x0000101000000000)
+                delta_mask: Bitboard::of([E5, E6])
             }
         ];
 
@@ -2743,12 +2748,12 @@ mod tests {
 
         let fen = "2k5/8/8/r2pP2K/8/8/6B1/8 w - d6 0 1";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e5 = list_moves_from(&position, Location(36));
+        let moves_from_e5 = list_moves_from(&position, E5);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::Pawn,
                 captured: None,
-                delta_mask: Bitboard(0x0000101000000000)
+                delta_mask: Bitboard::of([E5, E6])
             }
         ];
 
@@ -2781,12 +2786,12 @@ mod tests {
 
         let fen = "8/5bk1/8/2Pp4/8/1K6/8/8 w - d6 0 1";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_c5 = list_moves_from(&position, Location(34));
+        let moves_from_c5 = list_moves_from(&position, C5);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::Pawn,
                 captured: None,
-                delta_mask: Bitboard(0x0000040400000000)
+                delta_mask: Bitboard::of([C5, C6])
             }
         ];
 
@@ -2819,7 +2824,7 @@ mod tests {
 
         let fen = "4r3/5p2/p2k2pp/1p2n3/1P2P3/P1P2PB1/4K3/6R1 b - - 0 1";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e5 = list_moves_from(&position, Location(36));
+        let moves_from_e5 = list_moves_from(&position, E5);
 
         assert!(moves_from_e5.is_empty());
     }
@@ -2850,32 +2855,32 @@ mod tests {
 
         let fen = "8/4k3/1b6/8/3KP3/8/8/8 w - - 0 1";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_d4 = list_moves_from(&position, Location(27));
+        let moves_from_d4 = list_moves_from(&position, D4);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000000008040000)
+                delta_mask: Bitboard::of([D4, C3])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x000000000c000000)
+                delta_mask: Bitboard::of([D4, D3])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000000008080000)
+                delta_mask: Bitboard::of([D4, C4])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000000808000000)
+                delta_mask: Bitboard::of([D4, D5])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000001008000000)
+                delta_mask: Bitboard::of([D4, E5])
             }
         ];
 
@@ -2908,22 +2913,22 @@ mod tests {
 
         let fen = "8/8/8/3k3R/2ppp3/8/8/6K1 b - - 0 1";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_d5 = list_moves_from(&position, Location(35));
+        let moves_from_d5 = list_moves_from(&position, D5);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000040800000000)
+                delta_mask: Bitboard::of([D5, C6])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000080800000000)
+                delta_mask: Bitboard::of([D5, D6])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000100800000000)
+                delta_mask: Bitboard::of([D5, E6])
             }
         ];
 
@@ -2958,7 +2963,7 @@ mod tests {
         let fen = "3r2k1/5ppp/8/8/1Q6/1Pn5/P7/3K4 w - - 0 1";
         let position = Position::from_fen(fen).unwrap();
         let moves = list_moves(&position).0;
-        let moves_from_d1 = list_moves_from(&position, Location(3));
+        let moves_from_d1 = list_moves_from(&position, D1);
 
         assert_set_equals(moves, moves_from_d1);
     }
@@ -2989,21 +2994,21 @@ mod tests {
         let fen = "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2N2N2/PPPP1PPP/R1BQK2R \
             w KQkq - 0 1";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e1 = list_moves_from(&position, Location(4));
+        let moves_from_e1 = list_moves_from(&position, E1);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000000000000030)
+                delta_mask: Bitboard::of([E1, F1])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000000000001010)
+                delta_mask: Bitboard::of([E1, E2])
             },
             Move::Castle {
-                king_delta_mask: Bitboard(0x0000000000000050),
-                rook_delta_mask: Bitboard(0x00000000000000a0)
+                king_delta_mask: Bitboard::of([E1, G1]),
+                rook_delta_mask: Bitboard::of([H1, F1])
             }
         ];
 
@@ -3036,26 +3041,26 @@ mod tests {
         let fen = "r3k1nr/pppq1ppp/2npb3/2b1p3/2B1P3/2NPB3/PPPQ1PPP/R3K1NR w \
             KQkq - 0 1";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e1 = list_moves_from(&position, Location(4));
+        let moves_from_e1 = list_moves_from(&position, E1);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000000000000018)
+                delta_mask: Bitboard::of([E1, D1])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000000000000030)
+                delta_mask: Bitboard::of([E1, F1])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000000000001010)
+                delta_mask: Bitboard::of([E1, E2])
             },
             Move::Castle {
-                king_delta_mask: Bitboard(0x0000000000000014),
-                rook_delta_mask: Bitboard(0x0000000000000009)
+                king_delta_mask: Bitboard::of([E1, C1]),
+                rook_delta_mask: Bitboard::of([A1, D1])
             }
         ];
 
@@ -3088,30 +3093,30 @@ mod tests {
         let fen = "r3k2r/pppq1ppp/2npbn2/2b1p3/2B1P3/2NPBN2/PPPQ1PPP/R3K2R w \
             KQkq - 0 1";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e1 = list_moves_from(&position, Location(4));
+        let moves_from_e1 = list_moves_from(&position, E1);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000000000000018)
+                delta_mask: Bitboard::of([E1, D1])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000000000000030)
+                delta_mask: Bitboard::of([E1, F1])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000000000001010)
+                delta_mask: Bitboard::of([E1, E2])
             },
             Move::Castle {
-                king_delta_mask: Bitboard(0x0000000000000050),
-                rook_delta_mask: Bitboard(0x00000000000000a0)
+                king_delta_mask: Bitboard::of([E1, G1]),
+                rook_delta_mask: Bitboard::of([H1, F1])
             },
             Move::Castle {
-                king_delta_mask: Bitboard(0x0000000000000014),
-                rook_delta_mask: Bitboard(0x0000000000000009)
+                king_delta_mask: Bitboard::of([E1, C1]),
+                rook_delta_mask: Bitboard::of([A1, D1])
             }
         ];
 
@@ -3144,21 +3149,21 @@ mod tests {
         let fen = "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQK2R \
             b KQkq - 0 1";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e8 = list_moves_from(&position, Location(60));
+        let moves_from_e8 = list_moves_from(&position, E8);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x3000000000000000)
+                delta_mask: Bitboard::of([E8, F8])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x1010000000000000)
+                delta_mask: Bitboard::of([E7, E8])
             },
             Move::Castle {
-                king_delta_mask: Bitboard(0x5000000000000000),
-                rook_delta_mask: Bitboard(0xa000000000000000)
+                king_delta_mask: Bitboard::of([E8, G8]),
+                rook_delta_mask: Bitboard::of([H8, F8])
             }
         ];
 
@@ -3191,26 +3196,26 @@ mod tests {
         let fen = "r3k1nr/pppq1ppp/2npb3/2b1p3/2B1P3/2NPBN2/PPPQ1PPP/R3K2R b \
             KQkq - 0 1";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e8 = list_moves_from(&position, Location(60));
+        let moves_from_e8 = list_moves_from(&position, E8);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x1800000000000000)
+                delta_mask: Bitboard::of([E8, D8])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x3000000000000000)
+                delta_mask: Bitboard::of([E8, F8])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x1010000000000000)
+                delta_mask: Bitboard::of([E7, E8])
             },
             Move::Castle {
-                king_delta_mask: Bitboard(0x1400000000000000),
-                rook_delta_mask: Bitboard(0x0900000000000000)
+                king_delta_mask: Bitboard::of([E8, C8]),
+                rook_delta_mask: Bitboard::of([A8, D8])
             }
         ];
 
@@ -3243,30 +3248,30 @@ mod tests {
         let fen = "r3k2r/pppq1ppp/2npbn2/2b1p3/2B1P3/2NPBN1P/PPPQ1PP1/R3K2R b \
             KQkq - 0 1";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e8 = list_moves_from(&position, Location(60));
+        let moves_from_e8 = list_moves_from(&position, E8);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x1800000000000000)
+                delta_mask: Bitboard::of([E8, D8])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x3000000000000000)
+                delta_mask: Bitboard::of([E8, F8])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x1010000000000000)
+                delta_mask: Bitboard::of([E7, E8])
             },
             Move::Castle {
-                king_delta_mask: Bitboard(0x5000000000000000),
-                rook_delta_mask: Bitboard(0xa000000000000000)
+                king_delta_mask: Bitboard::of([E8, G8]),
+                rook_delta_mask: Bitboard::of([H8, F8])
             },
             Move::Castle {
-                king_delta_mask: Bitboard(0x1400000000000000),
-                rook_delta_mask: Bitboard(0x0900000000000000)
+                king_delta_mask: Bitboard::of([E8, C8]),
+                rook_delta_mask: Bitboard::of([A8, D8])
             }
         ];
 
@@ -3299,27 +3304,27 @@ mod tests {
 
         let fen = "2k5/8/8/8/8/2b5/8/4K2R w K - 0 1";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e1 = list_moves_from(&position, Location(4));
+        let moves_from_e1 = list_moves_from(&position, E1);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000000000000018)
+                delta_mask: Bitboard::of([E1, D1])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000000000001010)
+                delta_mask: Bitboard::of([E1, E2])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000000000002010)
+                delta_mask: Bitboard::of([E1, F2])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x0000000000000030)
+                delta_mask: Bitboard::of([E1, F1])
             }
         ];
 
@@ -3353,12 +3358,12 @@ mod tests {
 
         let fen = "r3k3/4p3/1N6/8/8/8/8/3K1R2 b q - 0 1";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e8 = list_moves_from(&position, Location(60));
+        let moves_from_e8 = list_moves_from(&position, E8);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x1800000000000000)
+                delta_mask: Bitboard::of([E8, D8])
             }
         ];
 
@@ -3392,7 +3397,7 @@ mod tests {
 
         let fen = "1k3r2/8/8/8/6b1/8/3P4/R3K3 w Q - 0 1";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e1 = list_moves_from(&position, Location(4));
+        let moves_from_e1 = list_moves_from(&position, E1);
 
         assert!(moves_from_e1.is_empty());
     }
@@ -3424,40 +3429,82 @@ mod tests {
 
         let fen = "r3k2r/pp4pp/4p3/3pPp2/2pP1P2/2P5/PP4PP/R3K2R b q - 0 1";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_e8 = list_moves_from(&position, Location(60));
+        let moves_from_e8 = list_moves_from(&position, E8);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x1800000000000000)
+                delta_mask: Bitboard::of([E8, D8])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x3000000000000000)
+                delta_mask: Bitboard::of([E8, F8])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x1008000000000000)
+                delta_mask: Bitboard::of([E8, D7])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x1020000000000000)
+                delta_mask: Bitboard::of([E8, F7])
             },
             Move::Ordinary {
                 moved: Piece::King,
                 captured: None,
-                delta_mask: Bitboard(0x1010000000000000)
+                delta_mask: Bitboard::of([E8, E7])
             },
             Move::Castle {
-                king_delta_mask: Bitboard(0x1400000000000000),
-                rook_delta_mask: Bitboard(0x0900000000000000)
+                king_delta_mask: Bitboard::of([E8, C8]),
+                rook_delta_mask: Bitboard::of([A8, D8])
             }
         ];
 
         assert_set_equals(expected_moves, moves_from_e8);
+    }
+
+    #[test]
+    fn castling_rook_over_attacked_square_is_allowed() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │ r │   │   │ q │ k │ b │   │ r │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ p │ p │ p │   │ n │ p │ p │ p │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ n │   │   │   │ b │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ p │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ P │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │ P │   │ B │ N │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ P │ P │   │ N │ Q │ P │ P │ P │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │ R │   │   │   │ K │ B │   │ R │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // Even though b1 is under attack by Black's bishop on g6, castling is
+        // allowed as long as the king does not castle into/over check.
+
+        let fen = "r2qkb1r/ppp1nppp/2n3b1/3p4/3P4/2P1BN2/PP1NQPPP/R3KB1R w KQkq - 0 1";
+        let position = Position::from_fen(fen).unwrap();
+        let moves_from_e1 = list_moves_from(&position, E1);
+        let expected_moves = vec![
+            Move::Ordinary {
+                moved: Piece::King,
+                captured: None,
+                delta_mask: Bitboard::of([E1, D1])
+            },
+            Move::Castle {
+                king_delta_mask: Bitboard::of([E1, C1]),
+                rook_delta_mask: Bitboard::of([A1, D1])
+            }
+        ];
+
+        assert_set_equals(expected_moves, moves_from_e1);
     }
 
     #[test]
@@ -3486,17 +3533,17 @@ mod tests {
 
         let fen = "8/q7/1P6/3K4/2n5/8/8/5k2 w - - 3 3";
         let position = Position::from_fen(fen).unwrap();
-        let moves_from_b6 = list_moves_from(&position, Location(41));
+        let moves_from_b6 = list_moves_from(&position, B6);
         let expected_moves = vec![
             Move::Ordinary {
                 moved: Piece::Pawn,
                 captured: None,
-                delta_mask: Bitboard(0x0002020000000000)
+                delta_mask: Bitboard::of([B6, B7])
             },
             Move::Ordinary {
                 moved: Piece::Pawn,
                 captured: Some(Piece::Queen),
-                delta_mask: Bitboard(0x0001020000000000)
+                delta_mask: Bitboard::of([B6, A7])
             }
         ];
 
@@ -3509,7 +3556,7 @@ mod tests {
         Move::Ordinary {
             moved: Piece::Pawn,
             captured: None,
-            delta_mask: Bitboard(0x0000000010001000)
+            delta_mask: Bitboard::of([E2, E4])
         }, "e4"
     )]
     #[case::pawn_capture(
@@ -3517,7 +3564,7 @@ mod tests {
         Move::Ordinary {
             moved: Piece::Pawn,
             captured: Some(Piece::Pawn),
-            delta_mask: Bitboard(0x0000000810000000)
+            delta_mask: Bitboard::of([E4, D5])
         }, "exd5"
     )]
     #[case::pawn_capture_with_check(
@@ -3525,7 +3572,7 @@ mod tests {
         Move::Ordinary {
             moved: Piece::Pawn,
             captured: Some(Piece::Pawn),
-            delta_mask: Bitboard(0x0000000810000000)
+            delta_mask: Bitboard::of([E4, D5])
         }, "exd5+"
     )]
     #[case::pawn_checkmate(
@@ -3533,7 +3580,7 @@ mod tests {
         Move::Ordinary {
             moved: Piece::Pawn,
             captured: None,
-            delta_mask: Bitboard(0x0000000020200000)
+            delta_mask: Bitboard::of([F4, F3])
         }, "f3#"
     )]
     #[case::promotion_no_capture(
@@ -3541,7 +3588,7 @@ mod tests {
         Move::Promotion {
             captured: None,
             promotion: Piece::Rook,
-            delta_mask: Bitboard(0x0000000000000404)
+            delta_mask: Bitboard::of([C2, C1])
         }, "c1=R"
     )]
     #[case::promotion_with_capture_and_check(
@@ -3549,28 +3596,28 @@ mod tests {
         Move::Promotion {
             captured: Some(Piece::Bishop),
             promotion: Piece::Queen,
-            delta_mask: Bitboard(0x1008000000000000)
+            delta_mask: Bitboard::of([D7, E8])
         }, "dxe8=Q+"
     )]
     #[case::en_passant(
         "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6",
         Move::EnPassant {
-            delta_mask: Bitboard(0x0000201000000000),
-            target: Bitboard(0x0000002000000000)
+            delta_mask: Bitboard::of([E5, F6]),
+            target: Bitboard::singleton(F5)
         }, "exf6"
     )]
     #[case::en_passant_check(
         "8/8/8/6k1/K1pP3r/8/8/8 b - d3",
         Move::EnPassant {
-            delta_mask: Bitboard(0x0000000004080000),
-            target: Bitboard(0x0000000008000000)
+            delta_mask: Bitboard::of([C4, D3]),
+            target: Bitboard::singleton(D4)
         }, "cxd3+"
     )]
     #[case::en_passant_mate(
         "1R6/7k/8/5NpP/8/8/6R1/6K1 w - g6",
         Move::EnPassant {
-            delta_mask: Bitboard(0x0000408000000000),
-            target: Bitboard(0x0000004000000000)
+            delta_mask: Bitboard::of([H5, G6]),
+            target: Bitboard::singleton(G5)
         }, "hxg6#"
     )]
     #[case::ordinary_knight_move(
@@ -3578,7 +3625,7 @@ mod tests {
         Move::Ordinary {
             moved: Piece::Knight,
             captured: None,
-            delta_mask: Bitboard(0x0000000000040002)
+            delta_mask: Bitboard::of([B1, C3])
         }, "Nc3"
     )]
     #[case::knight_move_with_source_file_and_rank(
@@ -3586,7 +3633,7 @@ mod tests {
         Move::Ordinary {
             moved: Piece::Knight,
             captured: None,
-            delta_mask: Bitboard(0x0000040008000000)
+            delta_mask: Bitboard::of([C6, D4])
         }, "Nc6d4"
     )]
     #[case::knight_capture_and_check(
@@ -3594,7 +3641,7 @@ mod tests {
         Move::Ordinary {
             moved: Piece::Knight,
             captured: Some(Piece::Pawn),
-            delta_mask: Bitboard(0x0004000200000000)
+            delta_mask: Bitboard::of([B5, C7])
         }, "Nxc7+"
     )]
     #[case::ordinary_bishop_move(
@@ -3602,7 +3649,7 @@ mod tests {
         Move::Ordinary {
             moved: Piece::Bishop,
             captured: None,
-            delta_mask: Bitboard(0x2000000400000000)
+            delta_mask: Bitboard::of([F8, C5])
         }, "Bc5"
     )]
     #[case::bishop_check(
@@ -3610,7 +3657,7 @@ mod tests {
         Move::Ordinary {
             moved: Piece::Bishop,
             captured: None,
-            delta_mask: Bitboard(0x2000000002000000)
+            delta_mask: Bitboard::of([F8, B4])
         }, "Bb4+"
     )]
     #[case::bishop_capture_and_mate(
@@ -3618,7 +3665,7 @@ mod tests {
         Move::Ordinary {
             moved: Piece::Bishop,
             captured: Some(Piece::Pawn),
-            delta_mask: Bitboard(0x0020000004000000)
+            delta_mask: Bitboard::of([C4, F7])
         }, "Bxf7#"
     )]
     #[case::ordinary_rook_move(
@@ -3626,7 +3673,7 @@ mod tests {
         Move::Ordinary {
             moved: Piece::Rook,
             captured: None,
-            delta_mask: Bitboard(0x0000000000000030)
+            delta_mask: Bitboard::of([F1, E1])
         }, "Re1"
     )]
     #[case::rook_with_source_file_and_check(
@@ -3634,7 +3681,7 @@ mod tests {
         Move::Ordinary {
             moved: Piece::Rook,
             captured: None,
-            delta_mask: Bitboard(0x3000000000000000)
+            delta_mask: Bitboard::of([F8, E8])
         }, "Rfe8+"
     )]
     #[case::rook_capture_with_source_rank(
@@ -3642,7 +3689,7 @@ mod tests {
         Move::Ordinary {
             moved: Piece::Rook,
             captured: Some(Piece::Knight),
-            delta_mask: Bitboard(0x0000001000001000)
+            delta_mask: Bitboard::of([E2, E5])
         }, "R2xe5"
     )]
     #[case::ordinary_queen_move(
@@ -3650,7 +3697,7 @@ mod tests {
         Move::Ordinary {
             moved: Piece::Queen,
             captured: None,
-            delta_mask: Bitboard(0x0000008000000008)
+            delta_mask: Bitboard::of([D1, H5])
         }, "Qh5"
     )]
     #[case::queen_with_source_file_where_rank_would_also_have_sufficed(
@@ -3658,7 +3705,7 @@ mod tests {
         Move::Ordinary {
             moved: Piece::Queen,
             captured: None,
-            delta_mask: Bitboard(0x0000000000a00000)
+            delta_mask: Bitboard::of([F3, H3])
         }, "Qfh3#"
     )]
     #[case::queen_move_with_maximal_parts(
@@ -3666,7 +3713,7 @@ mod tests {
         Move::Ordinary {
             moved: Piece::Queen,
             captured: Some(Piece::Rook),
-            delta_mask: Bitboard(0x0008000040000000)
+            delta_mask: Bitboard::of([D7, G4])
         }, "Qd7xg4+"
     )]
     #[case::ordinary_king_move(
@@ -3674,7 +3721,7 @@ mod tests {
         Move::Ordinary {
             moved: Piece::King,
             captured: None,
-            delta_mask: Bitboard(0x0000000000001010)
+            delta_mask: Bitboard::of([E1, E2])
         }, "Ke2"
     )]
     #[case::king_capture_and_mate(
@@ -3682,35 +3729,35 @@ mod tests {
         Move::Ordinary {
             moved: Piece::King,
             captured: Some(Piece::Knight),
-            delta_mask: Bitboard(0x4020000000000000)
+            delta_mask: Bitboard::of([G8, F7])
         }, "Kxf7#"
     )]
     #[case::white_short_castle(
         "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq -",
         Move::Castle {
-            king_delta_mask: Bitboard(0x0000000000000050),
-            rook_delta_mask: Bitboard(0x00000000000000a0)
+            king_delta_mask: Bitboard::of([E1, G1]),
+            rook_delta_mask: Bitboard::of([H1, F1])
         }, "O-O"
     )]
     #[case::black_long_castle(
         "r3kbnr/ppp2ppp/2np1q2/4p3/2B1P1b1/2NP1N2/PPP2PPP/R1BQ1RK1 b kq -",
         Move::Castle {
-            king_delta_mask: Bitboard(0x1400000000000000),
-            rook_delta_mask: Bitboard(0x0900000000000000)
+            king_delta_mask: Bitboard::of([E8, C8]),
+            rook_delta_mask: Bitboard::of([A8, D8])
         }, "O-O-O"
     )]
     #[case::white_long_castle_check(
         "3k4/8/8/8/8/8/8/R3K3 w Q -",
         Move::Castle {
-            king_delta_mask: Bitboard(0x0000000000000014),
-            rook_delta_mask: Bitboard(0x0000000000000009)
+            king_delta_mask: Bitboard::of([E1, C1]),
+            rook_delta_mask: Bitboard::of([A1, D1])
         }, "O-O-O+"
     )]
     #[case::black_short_castle_mate(
         "4k2r/4r3/2b5/8/8/7n/8/5K2 b - -",
         Move::Castle {
-            king_delta_mask: Bitboard(0x5000000000000000),
-            rook_delta_mask: Bitboard(0xa000000000000000)
+            king_delta_mask: Bitboard::of([E8, G8]),
+            rook_delta_mask: Bitboard::of([H8, F8])
         }, "O-O#"
     )]
     fn to_algebraic_notation_works(#[case] fen: &str, #[case] mov: Move,

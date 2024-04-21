@@ -10,6 +10,7 @@ doctest = false
 
 [dependencies]
 kvarko-proc-macro = { path = "../kvarko-proc-macro" }
+paste = "1.0"
 rand = "0.8"
 serde = { version = "1.0", features = [ "derive" ] }
 

@@ -1,6 +1,7 @@
 use kvarko_engine::{KvarkoEngine, StateEvaluatingController};
 use kvarko_engine::depth::IterativeDeepeningToDepth;
 use kvarko_model::board::Bitboard;
+use kvarko_model::board::locations::*;
 use kvarko_model::game::Controller;
 use kvarko_model::hash::ZobristHasher;
 use kvarko_model::movement::Move;
@@ -55,7 +56,7 @@ fn mate_in_2() {
     let best_move = Move::Ordinary {
         moved: Piece::Rook,
         captured: None,
-        delta_mask: Bitboard(0x0800000000000800)
+        delta_mask: Bitboard::of([D2, D8])
     };
 
     assert_finds_move(fen, 4, best_move);
@@ -88,7 +89,7 @@ fn mate_in_3() {
     let best_move = Move::Ordinary {
         moved: Piece::King,
         captured: None,
-        delta_mask: Bitboard(0x0000300000000000)
+        delta_mask: Bitboard::of([E6, F6])
     };
 
     assert_finds_move(fen, 6, best_move);
@@ -124,7 +125,7 @@ fn fork() {
     let best_move = Move::Ordinary {
         moved: Piece::Knight,
         captured: Some(Piece::Pawn),
-        delta_mask: Bitboard(0x0020004000000000)
+        delta_mask: Bitboard::of([G5, F7])
     };
 
     assert_finds_move(fen, 4, best_move);
@@ -159,7 +160,7 @@ fn capture_defended_piece_with_subsequent_fork() {
     let best_move = Move::Ordinary {
         moved: Piece::Bishop,
         captured: Some(Piece::Knight),
-        delta_mask: Bitboard(0x0000020000100000)
+        delta_mask: Bitboard::of([B6, E3])
     };
 
     assert_finds_move(fen, 6, best_move);
@@ -194,7 +195,7 @@ fn forced_capture() {
     let best_move = Move::Ordinary {
         moved: Piece::Bishop,
         captured: None,
-        delta_mask: Bitboard(0x0000000010080000)
+        delta_mask: Bitboard::of([D3, E4])
     };
 
     assert_finds_move(fen, 4, best_move);
@@ -229,7 +230,7 @@ fn skewer() {
     let best_move = Move::Ordinary {
         moved: Piece::Queen,
         captured: None,
-        delta_mask: Bitboard(0x0400000040000000)
+        delta_mask: Bitboard::of([G4, C8])
     };
 
     assert_finds_move(fen, 4, best_move);
