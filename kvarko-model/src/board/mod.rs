@@ -420,16 +420,34 @@ impl Bitboard {
         }
     }
 
+    /// Gets a bitboard of all fields in the given file.
+    ///
+    /// # Arguments
+    ///
+    /// * `file`: The file for which to get a bitboard.
+    ///
+    /// # Returns
+    ///
+    /// A bitboard which contains all fields in the given `file`.
     pub const fn of_file(file: File) -> Bitboard {
         const OF_A_FILE: u64 = 0x0101010101010101;
 
         Bitboard(OF_A_FILE << file.as_usize())
     }
 
+    /// Gets a bitboard of all fields on the given rank.
+    ///
+    /// # Arguments
+    ///
+    /// * `rank`: The rank for which to get a bitboard.
+    ///
+    /// # Returns
+    ///
+    /// A bitboard which contains all fields on the given `rank`.
     pub const fn of_rank(rank: Rank) -> Bitboard {
         const OF_RANK_1: u64 = 0x00000000000000ff;
 
-        Bitboard(OF_RANK_1 << rank.as_usize() * BOARD_WIDTH)
+        Bitboard(OF_RANK_1 << (rank.as_usize() * BOARD_WIDTH))
     }
 
     /// Gets the number of fields contained in this bitboard.
@@ -528,21 +546,65 @@ impl Bitboard {
         }
     }
 
+    /// Computes the union of this and the given other bitboard, containing all fields which are
+    /// contained in either one. Also accessible through the operator [BitOr].
+    ///
+    /// # Arguments
+    ///
+    /// * `other`: The other operand in the union operation, besides the callee.
+    ///
+    /// # Returns
+    ///
+    /// A bitboard containing exactly those fields contained in this or the `other` bitboard.
     #[inline]
     pub const fn union(self, other: Bitboard) -> Bitboard {
         Bitboard(self.0 | other.0)
     }
 
+    /// Computes the intersection of this and the given other bitboard, containing all fields which
+    /// are contained in both. Also accessible through the operator [BitAnd].
+    ///
+    /// # Arguments
+    ///
+    /// * `other`: The other operand in the intersection operation, besides the callee.
+    ///
+    /// # Returns
+    ///
+    /// A bitboard containing exactly those fields contained in this and the `other` bitboard.
     #[inline]
     pub const fn intersection(self, other: Bitboard) -> Bitboard {
         Bitboard(self.0 & other.0)
     }
 
+    /// Computes the symmetric difference between this and the given other bitboard, containing all
+    /// fields which are contained in one, but not both. Also accessible through the operator
+    /// [BitXor].
+    ///
+    /// # Arguments
+    ///
+    /// * `other`: The other operand in the symmetric difference operation, besides the callee.
+    ///
+    /// # Returns
+    ///
+    /// A bitboard containing exactly those fields contained in this or the `other` bitboard, but
+    /// not both.
     #[inline]
     pub const fn symmetric_difference(self, other: Bitboard) -> Bitboard {
         Bitboard(self.0 ^ other.0)
     }
 
+    /// Computes the difference between this and the given other bitboard, containing all fields
+    /// which are contained in this one, but not the `other`. Also accessible through the operator
+    /// [BitAnd].
+    ///
+    /// # Arguments
+    ///
+    /// * `other`: The other operand in the difference operation, containing the fields to be
+    /// excluded from the callee.
+    ///
+    /// # Returns
+    ///
+    /// A bitboard containing exactly those fields contained in this bitboard, but not the `other`.
     #[inline]
     pub const fn difference(self, other: Bitboard) -> Bitboard {
         Bitboard(self.0 & !other.0)
