@@ -72,7 +72,7 @@ pub trait BaseEvaluator<H: PositionHasher> {
 const DEFAULT_MATERIAL_VALUES: [Centipawns; 6] = [
     100,
     300,
-    325,
+    305,
     500,
     900,
     1000
@@ -82,6 +82,7 @@ const DEFAULT_MOVE_VALUE: Centipawns = 5;
 const DEFAULT_DOUBLED_PAWN_PENALTY: Centipawns = 25;
 const DEFAULT_PAWN_SIXTH_RANK_VALUE: Centipawns = 10;
 const DEFAULT_PAWN_SEVENTH_RANK_VALUE: Centipawns = 30;
+const DEFAULT_BISHOP_PAIR_VALUE: Centipawns = 45;
 
 const FILES: [Bitboard; 8] = [
     Bitboard(0x0101010101010101),
@@ -115,7 +116,8 @@ pub struct KvarkoBaseEvaluator {
     move_value: Centipawns,
     doubled_pawn_penalty: Centipawns,
     pawn_sixth_rank_value: Centipawns,
-    pawn_seventh_rank_value: Centipawns
+    pawn_seventh_rank_value: Centipawns,
+    bishop_pair_value: Centipawns
 }
 
 impl KvarkoBaseEvaluator {
@@ -169,6 +171,16 @@ impl KvarkoBaseEvaluator {
     }
 
     #[inline]
+    fn evaluate_bishop_pairs(&self, board: &Board, player: Player) -> Centipawns {
+        let bishops = board.of_player_and_kind(player, Piece::Bishop);
+        let light_squared_bishops = (bishops & Bitboard::LIGHT_SQUARES).len();
+        let dark_squared_bishops = (bishops & Bitboard::DARK_SQUARES).len();
+        let bishop_pairs = light_squared_bishops.min(dark_squared_bishops);
+
+        bishop_pairs as Centipawns * self.bishop_pair_value
+    }
+
+    #[inline]
     fn evaluate_doubled_pawns(&self, own_pawns: Bitboard, opponent_pawns: Bitboard) -> Centipawns {
         let mut value = 0;
 
@@ -192,7 +204,8 @@ impl Default for KvarkoBaseEvaluator {
             move_value: DEFAULT_MOVE_VALUE,
             doubled_pawn_penalty: DEFAULT_DOUBLED_PAWN_PENALTY,
             pawn_sixth_rank_value: DEFAULT_PAWN_SIXTH_RANK_VALUE,
-            pawn_seventh_rank_value: DEFAULT_PAWN_SEVENTH_RANK_VALUE
+            pawn_seventh_rank_value: DEFAULT_PAWN_SEVENTH_RANK_VALUE,
+            bishop_pair_value: DEFAULT_BISHOP_PAIR_VALUE
         }
     }
 }
@@ -233,7 +246,9 @@ impl<H: PositionHasher> BaseEvaluator<H> for KvarkoBaseEvaluator {
             + self.evaluate_material(board, turn, opponent)
             + self.evaluate_doubled_pawns(own_pawns, opponent_pawns)
             + self.evaluate_pawn_ranks(turn, own_pawns)
-            - self.evaluate_pawn_ranks(opponent, opponent_pawns);
+            - self.evaluate_pawn_ranks(opponent, opponent_pawns)
+            + self.evaluate_bishop_pairs(board, turn)
+            - self.evaluate_bishop_pairs(board, opponent);
 
         Evaluation::from_centipawns_unchecked(centipawns)
     }

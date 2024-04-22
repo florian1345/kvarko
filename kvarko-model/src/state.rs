@@ -692,9 +692,6 @@ impl Position {
     }
 }
 
-const LIGHT_SQUARES: Bitboard = Bitboard(0x55aa55aa55aa55aa);
-const DARK_SQUARES: Bitboard = Bitboard(0xaa55aa55aa55aa55);
-
 /// An enumeration of the different outcomes a game of Chess can have.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Outcome {
@@ -1060,8 +1057,8 @@ impl<H: PositionHasher> State<H> {
             let bishops = board.of_kind(Piece::Bishop);
             let insufficient_material =
                 (knights.len() == 1 && bishops.is_empty()) ||
-                (knights.is_empty() && (bishops.is_subset(LIGHT_SQUARES) ||
-                    bishops.is_subset(DARK_SQUARES)));
+                (knights.is_empty() && (bishops.is_subset(Bitboard::LIGHT_SQUARES) ||
+                    bishops.is_subset(Bitboard::DARK_SQUARES)));
 
             if insufficient_material {
                 // Draw by insufficient material

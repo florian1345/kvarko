@@ -381,6 +381,12 @@ impl Bitboard {
     /// The bitboard which contains every field.
     pub const FULL: Bitboard = Bitboard(0xffffffffffffffff);
 
+    /// The bitboard which contains all light squares.
+    pub const LIGHT_SQUARES: Bitboard = Bitboard(0x55aa55aa55aa55aa);
+
+    /// The bitboard which contains all dark squares.
+    pub const DARK_SQUARES: Bitboard = Bitboard(0xaa55aa55aa55aa55);
+
     /// Creates a new bitboard which contains exactly one field.
     ///
     /// # Arguments
