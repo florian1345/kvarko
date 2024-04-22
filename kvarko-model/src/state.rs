@@ -1,15 +1,15 @@
 //! This module defines the [Position] and [State] structs, which manage
 //! information about the current game situation.
 
-use crate::board::{Board, Bitboard, Location, File, Rank};
-use crate::error::{FenError, FenResult, AlgebraicResult};
-use crate::hash::{PositionHasher, IdHasher};
-use crate::movement::{Move, list_moves, LEFT_FILE, RIGHT_FILE};
-use crate::piece::Piece;
-use crate::player::{Black, Player, StaticPlayer, White, PLAYER_COUNT, PLAYERS};
-use crate::rules;
-
 use serde::{Deserialize, Serialize};
+
+use crate::board::{Bitboard, Board, File, Location, Rank};
+use crate::error::{AlgebraicResult, FenError, FenResult};
+use crate::hash::{IdHasher, PositionHasher};
+use crate::movement::{list_moves, Move};
+use crate::piece::Piece;
+use crate::player::{Black, Player, PLAYER_COUNT, PLAYERS, StaticPlayer, White};
+use crate::rules;
 
 /// Returned by [Position::make_move] to allow reverting the move with
 /// [Position::unmake_move].
@@ -385,11 +385,14 @@ impl Position {
     where
         P: StaticPlayer
     {
+        const A_FILE: Bitboard = Bitboard::of_file(File::A);
+        const H_FILE: Bitboard = Bitboard::of_file(File::H);
+
         if moved == Piece::Pawn && !(delta_mask & P::SECOND_RANK).is_empty() &&
                 !(delta_mask & P::FOURTH_RANK).is_empty() {
             let target_singleton = delta_mask & P::FOURTH_RANK;
-            let left_neighbor = (target_singleton - LEFT_FILE) >> 1;
-            let right_neighbor = (target_singleton - RIGHT_FILE) << 1;
+            let left_neighbor = (target_singleton - A_FILE) >> 1;
+            let right_neighbor = (target_singleton - H_FILE) << 1;
             let neighbors = left_neighbor | right_neighbor;
             let opponent_pawns = self.board.of_player_and_kind(self.turn.opponent(), Piece::Pawn);
 
@@ -1122,10 +1125,9 @@ impl<H: PositionHasher> State<H> {
 
 #[cfg(test)]
 mod tests {
+    use crate::board::locations::*;
 
     use super::*;
-
-    use crate::board::locations::*;
 
     const UNSET: usize = 1337;
 

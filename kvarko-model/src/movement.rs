@@ -22,8 +22,6 @@ const KNIGHT_ATTACK_MASKS: [Bitboard; 64] =
     kvarko_proc_macro::knight_attacks!();
 const KING_ATTACK_MASKS: [Bitboard; 64] = kvarko_proc_macro::king_attacks!();
 
-pub(crate) const LEFT_FILE: Bitboard = Bitboard(0x0101010101010101);
-pub(crate) const RIGHT_FILE: Bitboard = Bitboard(0x8080808080808080);
 const WHITE_EN_PASSANT_TARGET_RANK: Rank = Rank::R6;
 const BLACK_EN_PASSANT_TARGET_RANK: Rank = Rank::R3;
 
@@ -46,9 +44,12 @@ fn get_pawn_push<D: StaticPlayer>(occupancy: Bitboard,
 }
 
 fn get_pawn_attack<D: StaticPlayer>(pawns: Bitboard) -> Bitboard {
+    const A_FILE: Bitboard = Bitboard::of_file(File::A);
+    const H_FILE: Bitboard = Bitboard::of_file(File::H);
+    
     let straight = D::forward(pawns);
 
-    ((straight << 1) & !LEFT_FILE) | ((straight >> 1) & !RIGHT_FILE)
+    ((straight << 1) - A_FILE) | ((straight >> 1) - H_FILE)
 }
 
 fn get_bishop_attack(occupancy: Bitboard, square: Location) -> Bitboard {

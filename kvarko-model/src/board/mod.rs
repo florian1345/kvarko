@@ -28,6 +28,7 @@ use std::ops::{
     Sub,
     SubAssign
 };
+use crate::board::locations::{A1, A8, B1, B8, C1, C8, D1, D8, E1, E8, F1, F8, G1, G8, H1, H8};
 
 /// Represents a file (column of fields) on the Chess board. Can be converted to and from 0-based
 /// file indices using [File::from_usize] and [File::as_usize].
@@ -390,30 +391,63 @@ impl Bitboard {
     /// # Returns
     ///
     /// A new bitboard which contains `location` and nothing else.
-    pub fn singleton(location: Location) -> Bitboard {
+    pub const fn singleton(location: Location) -> Bitboard {
         Bitboard(1 << location.0)
     }
 
-    /// Creates a new bitboards which contains all fields specified by the given iterable.
+    /// Creates a new bitboards which contains all fields specified by the given array.
     ///
     /// # Arguments
     ///
-    /// * `locations`: An [IntoIterator] whose items implement [Into] for [Location]. Each item is
-    /// converted into a [Location] and added to the resulting bitboard.
+    /// * `locations`: An array of [Location]s, each of which is added to the resulting bitboard.
     ///
     /// # Returns
     ///
     /// A new bitboard which contains the given `locations` and nothing else.
-    pub fn of<L, I>(locations: I) -> Bitboard
-    where
-        L: Into<Location>,
-        I: IntoIterator<Item = L>
-    {
-        locations.into_iter()
-            .map(L::into)
-            .map(Bitboard::singleton)
-            .reduce(Bitboard::bitor)
-            .unwrap_or(Bitboard::EMPTY)
+    pub const fn of<const LEN: usize>(locations: [Location; LEN]) -> Bitboard {
+        // TODO cleanup once more features become const (for loop, |=-operator)
+
+        let mut result = Bitboard::EMPTY;
+        let mut index = 0;
+
+        loop {
+            if index == LEN {
+                return result;
+            }
+
+            result = result.union(Bitboard::singleton(locations[index]));
+            index += 1;
+        }
+    }
+
+    /// Gets a bitboard of all fields in the given file.
+    ///
+    /// # Arguments
+    ///
+    /// * `file`: The file for which to get a bitboard.
+    ///
+    /// # Returns
+    ///
+    /// A bitboard which contains all fields in the given `file`.
+    pub const fn of_file(file: File) -> Bitboard {
+        const OF_A_FILE: u64 = 0x0101010101010101;
+
+        Bitboard(OF_A_FILE << file.as_usize())
+    }
+
+    /// Gets a bitboard of all fields on the given rank.
+    ///
+    /// # Arguments
+    ///
+    /// * `rank`: The rank for which to get a bitboard.
+    ///
+    /// # Returns
+    ///
+    /// A bitboard which contains all fields on the given `rank`.
+    pub const fn of_rank(rank: Rank) -> Bitboard {
+        const OF_RANK_1: u64 = 0x00000000000000ff;
+
+        Bitboard(OF_RANK_1 << (rank.as_usize() * BOARD_WIDTH))
     }
 
     /// Gets the number of fields contained in this bitboard.
@@ -511,13 +545,77 @@ impl Bitboard {
             bitboard: self
         }
     }
+
+    /// Computes the union of this and the given other bitboard, containing all fields which are
+    /// contained in either one. Also accessible through the operator [BitOr].
+    ///
+    /// # Arguments
+    ///
+    /// * `other`: The other operand in the union operation, besides the callee.
+    ///
+    /// # Returns
+    ///
+    /// A bitboard containing exactly those fields contained in this or the `other` bitboard.
+    #[inline]
+    pub const fn union(self, other: Bitboard) -> Bitboard {
+        Bitboard(self.0 | other.0)
+    }
+
+    /// Computes the intersection of this and the given other bitboard, containing all fields which
+    /// are contained in both. Also accessible through the operator [BitAnd].
+    ///
+    /// # Arguments
+    ///
+    /// * `other`: The other operand in the intersection operation, besides the callee.
+    ///
+    /// # Returns
+    ///
+    /// A bitboard containing exactly those fields contained in this and the `other` bitboard.
+    #[inline]
+    pub const fn intersection(self, other: Bitboard) -> Bitboard {
+        Bitboard(self.0 & other.0)
+    }
+
+    /// Computes the symmetric difference between this and the given other bitboard, containing all
+    /// fields which are contained in one, but not both. Also accessible through the operator
+    /// [BitXor].
+    ///
+    /// # Arguments
+    ///
+    /// * `other`: The other operand in the symmetric difference operation, besides the callee.
+    ///
+    /// # Returns
+    ///
+    /// A bitboard containing exactly those fields contained in this or the `other` bitboard, but
+    /// not both.
+    #[inline]
+    pub const fn symmetric_difference(self, other: Bitboard) -> Bitboard {
+        Bitboard(self.0 ^ other.0)
+    }
+
+    /// Computes the difference between this and the given other bitboard, containing all fields
+    /// which are contained in this one, but not the `other`. Also accessible through the operator
+    /// [BitAnd].
+    ///
+    /// # Arguments
+    ///
+    /// * `other`: The other operand in the difference operation, containing the fields to be
+    /// excluded from the callee.
+    ///
+    /// # Returns
+    ///
+    /// A bitboard containing exactly those fields contained in this bitboard, but not the `other`.
+    #[inline]
+    pub const fn difference(self, other: Bitboard) -> Bitboard {
+        Bitboard(self.0 & !other.0)
+    }
 }
 
 impl BitOr for Bitboard {
     type Output = Bitboard;
 
     fn bitor(self, rhs: Bitboard) -> Bitboard {
-        Bitboard(self.0 | rhs.0)
+        self.union(rhs)
     }
 }
 
@@ -531,7 +629,7 @@ impl BitAnd for Bitboard {
     type Output = Bitboard;
 
     fn bitand(self, rhs: Bitboard) -> Bitboard {
-        Bitboard(self.0 & rhs.0)
+        self.intersection(rhs)
     }
 }
 
@@ -545,7 +643,7 @@ impl BitXor for Bitboard {
     type Output = Bitboard;
 
     fn bitxor(self, rhs: Bitboard) -> Bitboard {
-        Bitboard(self.0 ^ rhs.0)
+        self.symmetric_difference(rhs)
     }
 }
 
@@ -559,7 +657,7 @@ impl Sub for Bitboard {
     type Output = Bitboard;
 
     fn sub(self, rhs: Bitboard) -> Bitboard {
-        Bitboard(self.0 & !rhs.0)
+        self.difference(rhs)
     }
 }
 
@@ -656,15 +754,15 @@ pub const BOARD_WIDTH: usize = 8;
 /// The height of a Chess board, i.e. the number of ranks.
 pub const BOARD_HEIGHT: usize = 8;
 
-const INITIAL_WHITE: Bitboard = Bitboard(0x000000000000ffff);
-const INITIAL_BLACK: Bitboard = Bitboard(0xffff000000000000);
+const INITIAL_WHITE: Bitboard = Bitboard::of_rank(Rank::R1).union(Bitboard::of_rank(Rank::R2));
+const INITIAL_BLACK: Bitboard = Bitboard::of_rank(Rank::R8).union(Bitboard::of_rank(Rank::R7));
 
-const INITIAL_PAWN: Bitboard = Bitboard(0x00ff00000000ff00);
-const INITIAL_KNIGHT: Bitboard = Bitboard(0x4200000000000042);
-const INITIAL_BISHOP: Bitboard = Bitboard(0x2400000000000024);
-const INITIAL_ROOK: Bitboard = Bitboard(0x8100000000000081);
-const INITIAL_QUEEN: Bitboard = Bitboard(0x0800000000000008);
-const INITIAL_KING: Bitboard = Bitboard(0x1000000000000010);
+const INITIAL_PAWN: Bitboard = Bitboard::of_rank(Rank::R2).union(Bitboard::of_rank(Rank::R7));
+const INITIAL_KNIGHT: Bitboard = Bitboard::of([B1, G1, B8, G8]);
+const INITIAL_BISHOP: Bitboard = Bitboard::of([C1, F1, C8, F8]);
+const INITIAL_ROOK: Bitboard = Bitboard::of([A1, H1, A8, H8]);
+const INITIAL_QUEEN: Bitboard = Bitboard::of([D1, D8]);
+const INITIAL_KING: Bitboard = Bitboard::of([E1, E8]);
 
 fn write_fen_gap(fen: &mut String, gap_counter: &mut usize) {
     if *gap_counter != 0 {
@@ -1139,18 +1237,12 @@ mod tests {
     }
 
     #[rstest]
-    #[case::empty(vec![], Bitboard(0))]
-    #[case::single(
-        vec![(File::A, Rank::R1)],
-        Bitboard(1))]
-    #[case::multiple(
-        vec![(File::A, Rank::R1), (File::B, Rank::R1)],
-        Bitboard(3))]
-    #[case::repeats(
-        vec![(File::B, Rank::R1), (File::C, Rank::R1), (File::B, Rank::R1)],
-        Bitboard(6))]
-    fn bitboard_from_multiple_locations(
-            #[case] locations: Vec<(File, Rank)>,
+    #[case::empty([], Bitboard(0))]
+    #[case::single([A1], Bitboard(1))]
+    #[case::multiple([A1, B1], Bitboard(3))]
+    #[case::repeats([B1, C1, B1], Bitboard(6))]
+    fn bitboard_from_multiple_locations<const LEN: usize>(
+            #[case] locations: [Location; LEN],
             #[case] expected: Bitboard) {
         let actual = Bitboard::of(locations);
 
