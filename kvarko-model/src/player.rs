@@ -1,10 +1,11 @@
 //! This module defines the [Player] enumeration and any associated
 //! functionality.
 
-use crate::board::{Bitboard, BOARD_WIDTH};
+use crate::board::{Bitboard, BOARD_WIDTH, Rank};
 use crate::error::{FenResult, FenError};
 
 use std::mem;
+use crate::board::locations::{A1, A8, B1, B8, C1, C8, D1, D8, E1, E8, F1, F8, G1, G8, H1, H8};
 
 /// An enumeration of the two different players. This can be converted to a
 /// [usize] to obtain the player index.
@@ -164,26 +165,26 @@ impl StaticPlayer for White {
 
     type Opponent = Black;
 
-    const SECOND_RANK: Bitboard = Bitboard(0x000000000000ff00);
-    const FOURTH_RANK: Bitboard = Bitboard(0x00000000ff000000);
-    const FIFTH_RANK: Bitboard = Bitboard(0x000000ff00000000);
-    const EIGHTH_RANK: Bitboard = Bitboard(0xff00000000000000);
+    const SECOND_RANK: Bitboard = Bitboard::of_rank(Rank::R2);
+    const FOURTH_RANK: Bitboard = Bitboard::of_rank(Rank::R4);
+    const FIFTH_RANK: Bitboard = Bitboard::of_rank(Rank::R5);
+    const EIGHTH_RANK: Bitboard = Bitboard::of_rank(Rank::R8);
 
-    const CLOSE_ROOK_SINGLETON: Bitboard = Bitboard(0x0000000000000080);
-    const FAR_ROOK_SINGLETON: Bitboard = Bitboard(0x0000000000000001);
+    const CLOSE_ROOK_SINGLETON: Bitboard = Bitboard::singleton(H1);
+    const FAR_ROOK_SINGLETON: Bitboard = Bitboard::singleton(A1);
 
     const SHORT_CASTLE_INFO: CastleInfo = CastleInfo {
-        intermediate: Bitboard(0x0000000000000060),
-        passed: Bitboard(0x0000000000000060),
-        king_delta_mask: Bitboard(0x0000000000000050),
-        rook_delta_mask: Bitboard(0x00000000000000a0)
+        intermediate: Bitboard::of([F1, G1]),
+        passed: Bitboard::of([F1, G1]),
+        king_delta_mask: Bitboard::of([E1, G1]),
+        rook_delta_mask: Bitboard::of([H1, F1])
     };
 
     const LONG_CASTLE_INFO: CastleInfo = CastleInfo {
-        intermediate: Bitboard(0x000000000000000e),
-        passed: Bitboard(0x000000000000000c),
-        king_delta_mask: Bitboard(0x0000000000000014),
-        rook_delta_mask: Bitboard(0x0000000000000009)
+        intermediate: Bitboard::of([B1, C1, D1]),
+        passed: Bitboard::of([C1, D1]),
+        king_delta_mask: Bitboard::of([E1, C1]),
+        rook_delta_mask: Bitboard::of([A1, D1])
     };
 
     fn forward(bitboard: Bitboard) -> Bitboard {
@@ -201,26 +202,26 @@ impl StaticPlayer for Black {
 
     type Opponent = White;
 
-    const SECOND_RANK: Bitboard = Bitboard(0x00ff000000000000);
-    const FOURTH_RANK: Bitboard = Bitboard(0x000000ff00000000);
-    const FIFTH_RANK: Bitboard = Bitboard(0x00000000ff000000);
-    const EIGHTH_RANK: Bitboard = Bitboard(0x00000000000000ff);
+    const SECOND_RANK: Bitboard = Bitboard::of_rank(Rank::R7);
+    const FOURTH_RANK: Bitboard = Bitboard::of_rank(Rank::R5);
+    const FIFTH_RANK: Bitboard = Bitboard::of_rank(Rank::R4);
+    const EIGHTH_RANK: Bitboard = Bitboard::of_rank(Rank::R1);
 
-    const CLOSE_ROOK_SINGLETON: Bitboard = Bitboard(0x8000000000000000);
-    const FAR_ROOK_SINGLETON: Bitboard = Bitboard(0x0100000000000000);
+    const CLOSE_ROOK_SINGLETON: Bitboard = Bitboard::singleton(H8);
+    const FAR_ROOK_SINGLETON: Bitboard = Bitboard::singleton(A8);
 
     const SHORT_CASTLE_INFO: CastleInfo = CastleInfo {
-        intermediate: Bitboard(0x6000000000000000),
-        passed: Bitboard(0x6000000000000000),
-        king_delta_mask: Bitboard(0x5000000000000000),
-        rook_delta_mask: Bitboard(0xa000000000000000)
+        intermediate: Bitboard::of([F8, G8]),
+        passed: Bitboard::of([F8, G8]),
+        king_delta_mask: Bitboard::of([E8, G8]),
+        rook_delta_mask: Bitboard::of([H8, F8])
     };
 
     const LONG_CASTLE_INFO: CastleInfo = CastleInfo {
-        intermediate: Bitboard(0x0e00000000000000),
-        passed: Bitboard(0x0c00000000000000),
-        king_delta_mask: Bitboard(0x1400000000000000),
-        rook_delta_mask: Bitboard(0x0900000000000000)
+        intermediate: Bitboard::of([B8, C8, D8]),
+        passed: Bitboard::of([C8, D8]),
+        king_delta_mask: Bitboard::of([E8, C8]),
+        rook_delta_mask: Bitboard::of([A8, D8])
     };
 
     fn forward(bitboard: Bitboard) -> Bitboard {
