@@ -3838,4 +3838,85 @@ mod tests {
 
         assert_that!(algebraic).contains(expected.to_owned());
     }
+
+    #[rstest]
+    #[case::ordinary_move("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -",
+        Move::Ordinary {
+            moved: Piece::Pawn,
+            captured: None,
+            delta_mask: Bitboard::of([E2, E4])
+        }, "e2e4"
+    )]
+    #[case::capture("7k/8/6n1/8/7N/8/7P/7K b - -",
+        Move::Ordinary {
+            moved: Piece::Knight,
+            captured: Some(Piece::Knight),
+            delta_mask: Bitboard::of([G6, H4])
+        }, "g6h4"
+    )]
+    #[case::promotion_knight("8/kPK5/8/8/8/8/8/8 w - -",
+        Move::Promotion {
+            promotion: Piece::Knight,
+            captured: None,
+            delta_mask: Bitboard::of([B7, B8])
+        }, "b7b8n"
+    )]
+    #[case::promotion_bishop("8/kPK5/8/8/8/8/8/8 w - -",
+        Move::Promotion {
+            promotion: Piece::Bishop,
+            captured: None,
+            delta_mask: Bitboard::of([B7, B8])
+        }, "b7b8b"
+    )]
+    #[case::promotion_rook("8/kPK5/8/8/8/8/8/8 w - -",
+        Move::Promotion {
+            promotion: Piece::Rook,
+            captured: None,
+            delta_mask: Bitboard::of([B7, B8])
+        }, "b7b8r"
+    )]
+    #[case::promotion_queen("8/kPK5/8/8/8/8/8/8 w - -",
+        Move::Promotion {
+            promotion: Piece::Queen,
+            captured: None,
+            delta_mask: Bitboard::of([B7, B8])
+        }, "b7b8q"
+    )]
+    #[case::en_passant("k7/8/8/8/pP6/8/8/K7 b - b3",
+        Move::EnPassant {
+            delta_mask: Bitboard::of([A4, B3]),
+            target: Bitboard::singleton(B4)
+        }, "a4b3"
+    )]
+    #[case::white_short_castle("r1bqk2r/1ppp1ppp/p1n2n2/2b1p3/B3P3/2N2N2/PPPP1PPP/R1BQK2R w KQkq -",
+        Move::Castle {
+            king_delta_mask: Bitboard::of([E1, G1]),
+            rook_delta_mask: Bitboard::of([H1, F1])
+        }, "e1g1"
+    )]
+    #[case::black_short_castle("r1bqk2r/1ppp1ppp/p1n2n2/2b1p3/B3P3/2N2N2/PPPP1PPP/R1BQ1RK1 b kq -",
+        Move::Castle {
+            king_delta_mask: Bitboard::of([E8, G8]),
+            rook_delta_mask: Bitboard::of([H8, F8])
+        }, "e8g8"
+    )]
+    #[case::white_long_castle("r3kbnr/pppqpppp/2n5/3p1b2/3P1B2/2N5/PPPQPPPP/R3KBNR w KQkq -",
+        Move::Castle {
+            king_delta_mask: Bitboard::of([E1, C1]),
+            rook_delta_mask: Bitboard::of([A1, D1])
+        }, "e1c1"
+    )]
+    #[case::black_long_castle("r3kbnr/pppqpppp/2n5/3p1b2/3P1B2/2N5/PPPQPPPP/2KR1BNR b kq -",
+        Move::Castle {
+            king_delta_mask: Bitboard::of([E8, C8]),
+            rook_delta_mask: Bitboard::of([A8, D8])
+        }, "e8c8"
+    )]
+    fn to_uci_notation_works(#[case] fen: &str, #[case] mov: Move, #[case] expected: &str) {
+        let position = Position::from_fen(fen).unwrap();
+
+        let uci_notation = mov.to_uci_notation(&position);
+
+        assert_that!(uci_notation).contains(expected.to_owned());
+    }
 }
