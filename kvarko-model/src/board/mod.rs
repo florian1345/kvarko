@@ -304,12 +304,6 @@ impl Display for Location {
     }
 }
 
-impl From<(File, Rank)> for Location {
-    fn from((file, rank): (File, Rank)) -> Location {
-        Location::from_file_and_rank(file, rank)
-    }
-}
-
 /// An [Iterator] over [Location]s of the squares contained in a [Bitboard].
 pub struct BitboardLocationIter {
     bitboard: Bitboard
@@ -1255,6 +1249,36 @@ mod tests {
         assert_that!(actual).is_equal_to(expected);
     }
 
+    #[rstest]
+    #[case::a_file(File::A, Bitboard::of([A1, A2, A3, A4, A5, A6, A7, A8]))]
+    #[case::b_file(File::B, Bitboard::of([B1, B2, B3, B4, B5, B6, B7, B8]))]
+    #[case::c_file(File::C, Bitboard::of([C1, C2, C3, C4, C5, C6, C7, C8]))]
+    #[case::d_file(File::D, Bitboard::of([D1, D2, D3, D4, D5, D6, D7, D8]))]
+    #[case::e_file(File::E, Bitboard::of([E1, E2, E3, E4, E5, E6, E7, E8]))]
+    #[case::f_file(File::F, Bitboard::of([F1, F2, F3, F4, F5, F6, F7, F8]))]
+    #[case::g_file(File::G, Bitboard::of([G1, G2, G3, G4, G5, G6, G7, G8]))]
+    #[case::h_file(File::H, Bitboard::of([H1, H2, H3, H4, H5, H6, H7, H8]))]
+    fn bitboard_from_file(#[case] file: File, #[case] expected: Bitboard) {
+        let actual = Bitboard::of_file(file);
+
+        assert_that!(actual).is_equal_to(expected);
+    }
+
+    #[rstest]
+    #[case::rank_1(Rank::R1, Bitboard::of([A1, B1, C1, D1, E1, F1, G1, H1]))]
+    #[case::rank_2(Rank::R2, Bitboard::of([A2, B2, C2, D2, E2, F2, G2, H2]))]
+    #[case::rank_3(Rank::R3, Bitboard::of([A3, B3, C3, D3, E3, F3, G3, H3]))]
+    #[case::rank_4(Rank::R4, Bitboard::of([A4, B4, C4, D4, E4, F4, G4, H4]))]
+    #[case::rank_5(Rank::R5, Bitboard::of([A5, B5, C5, D5, E5, F5, G5, H5]))]
+    #[case::rank_6(Rank::R6, Bitboard::of([A6, B6, C6, D6, E6, F6, G6, H6]))]
+    #[case::rank_7(Rank::R7, Bitboard::of([A7, B7, C7, D7, E7, F7, G7, H7]))]
+    #[case::rank_8(Rank::R8, Bitboard::of([A8, B8, C8, D8, E8, F8, G8, H8]))]
+    fn bitboard_from_rank(#[case] rank: Rank, #[case] expected: Bitboard) {
+        let actual = Bitboard::of_rank(rank);
+
+        assert_that!(actual).is_equal_to(expected);
+    }
+
     const INITIAL_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
 
     #[test]
@@ -1286,6 +1310,38 @@ mod tests {
     fn arbitrary_board_fen_reproducible() {
         assert_board_fen_reproducible(
             "r2q1rk1/p2n1pp1/2pb1np1/1p6/2BP1P2/6N1/PPP3PP/R1BQR1K1");
+    }
+
+    #[rstest]
+    #[case::too_few("r1bqkbnr/pppp1ppp/2n5/4P3/5N2/PPPP1PPP/RNBQKB1R")]
+    #[case::too_many("r1bqkbnr/pppp1ppp/2n5/4p3/8/4P3/5N2/PPPP1PPP/RNBQKB1R")]
+    fn fen_with_wrong_rank_count_raises_error(#[case] fen: &str) {
+        let result = Board::from_fen(fen);
+
+        assert_that!(result).is_equal_to(Err(FenError::WrongRankCount(fen.to_owned())));
+    }
+
+    #[rstest]
+    #[case::too_small("4p2")]
+    #[case::too_large("4p4")]
+    fn fen_with_wrong_rank_size_raises_error(#[case] rank: &str) {
+        let fen = format!("r1bqkbnr/pppp1ppp/2n5/{}/4P3/5N2/PPPP1PPP/RNBQKB1R", rank);
+        let result = Board::from_fen(&fen);
+
+        assert_that!(result).is_equal_to(Err(FenError::WrongRankSize(rank.to_owned())));
+    }
+
+    #[rstest]
+    #[case::zero('0')]
+    #[case::nine('9')]
+    #[case::invalid_letter('g')]
+    #[case::invalid_symbol('#')]
+    #[case::non_bmp_char('\u{1f60a}')]
+    fn fen_with_invalid_piece_char_raises_error(#[case] piece_char: char) {
+        let fen = format!("8/8/8/8/8/8/8/7{}", piece_char);
+        let result = Board::from_fen(&fen);
+
+        assert_that!(result).is_equal_to(Err(FenError::InvalidPiece(piece_char)));
     }
 
     fn assert_consistent(board: &Board) {
