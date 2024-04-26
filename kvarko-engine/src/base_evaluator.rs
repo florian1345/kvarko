@@ -260,6 +260,7 @@ mod tests {
     use kvarko_model::hash::ZobristHasher;
 
     use kernal::prelude::*;
+    use rstest::rstest;
     use kvarko_model::movement::Move;
 
     use super::*;
@@ -393,65 +394,233 @@ mod tests {
         assert_that!(eval).is_equal_to(Evaluation::CHECKMATED);
     }
 
-    #[test]
-    fn base_evaluator_favors_clear_material_advantage() {
-        // Board (black to move):
-        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
-        // │   │   │   │   │   │   │   │ k │
-        // ├───┼───┼───┼───┼───┼───┼───┼───┤
-        // │   │   │   │   │   │   │   │   │
-        // ├───┼───┼───┼───┼───┼───┼───┼───┤
-        // │   │   │   │   │   │   │   │   │
-        // ├───┼───┼───┼───┼───┼───┼───┼───┤
-        // │   │   │   │   │   │   │   │   │
-        // ├───┼───┼───┼───┼───┼───┼───┼───┤
-        // │   │   │   │   │ b │   │   │   │
-        // ├───┼───┼───┼───┼───┼───┼───┼───┤
-        // │   │   │   │   │   │   │   │   │
-        // ├───┼───┼───┼───┼───┼───┼───┼───┤
-        // │ K │   │   │   │   │   │   │   │
-        // ├───┼───┼───┼───┼───┼───┼───┼───┤
-        // │ R │   │   │   │   │   │   │   │
-        // └───┴───┴───┴───┴───┴───┴───┴───┘
-        //
-        // Black has more legal moves, but White is up an exchange.
-
-        let mut state =
-            State::from_fen("7k/8/8/8/4b3/8/K7/R7 b - - 0 1").unwrap();
-
-        let eval = eval_with_kvarko_base_evaluator(&mut state);
-
-        assert_that!(eval).is_negative();
+    struct MaterialValues {
+        pawn_value: Centipawns,
+        knight_value: Centipawns,
+        bishop_value: Centipawns,
+        rook_value: Centipawns,
+        queen_value: Centipawns
     }
 
-    #[test]
-    fn base_evaluator_favors_mobility() {
-        // Board (white to move):
-        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
-        // │   │   │   │   │   │ b │   │ k │
-        // ├───┼───┼───┼───┼───┼───┼───┼───┤
-        // │   │   │   │   │   │   │   │   │
-        // ├───┼───┼───┼───┼───┼───┼───┼───┤
-        // │   │   │   │   │   │   │   │   │
-        // ├───┼───┼───┼───┼───┼───┼───┼───┤
-        // │   │   │   │   │   │   │   │   │
-        // ├───┼───┼───┼───┼───┼───┼───┼───┤
-        // │   │   │   │   │ B │   │   │   │
-        // ├───┼───┼───┼───┼───┼───┼───┼───┤
-        // │   │   │   │   │   │   │   │   │
-        // ├───┼───┼───┼───┼───┼───┼───┼───┤
-        // │   │ K │   │   │   │   │   │   │
-        // ├───┼───┼───┼───┼───┼───┼───┼───┤
-        // │   │   │   │   │   │   │   │   │
-        // └───┴───┴───┴───┴───┴───┴───┴───┘
-        //
-        // Although material is equal, White has more available moves.
+    const ZERO_MATERIAL_VALUES: MaterialValues = MaterialValues {
+        pawn_value: 0,
+        knight_value: 0,
+        bishop_value: 0,
+        rook_value: 0,
+        queen_value: 0
+    };
 
-        let mut state =
-            State::from_fen("5b1k/8/8/8/4B3/8/1K6/8 w - - 0 1").unwrap();
+    /// Likelihood that different pieces cancel each other out is low. Serves to check that
+    /// different states have equal material evaluation.
+    const PRIME_MATERIAL_VALUES: MaterialValues = MaterialValues {
+        pawn_value: 17,
+        knight_value: 19,
+        bishop_value: 23,
+        rook_value: 29,
+        queen_value: 31
+    };
 
-        let eval = eval_with_kvarko_base_evaluator(&mut state);
+    const ZERO_KVARKO_BASE_EVALUATOR: KvarkoBaseEvaluator = KvarkoBaseEvaluator {
+        values: [0; 6],
+        move_value: 0,
+        doubled_pawn_penalty: 0,
+        pawn_sixth_rank_value: 0,
+        pawn_seventh_rank_value: 0,
+        bishop_pair_value: 0
+    };
 
-        assert_that!(eval).is_positive();
+    #[rstest]
+    #[case::starting_material_whites_turn(
+        PRIME_MATERIAL_VALUES, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 0)]
+    #[case::starting_material_blacks_turn(
+        PRIME_MATERIAL_VALUES, "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", 0)]
+    #[case::equal_material_whites_turn(
+        PRIME_MATERIAL_VALUES, "k7/1qrbnpp1/8/8/8/8/1QRBNPP1/K7 w - - 0 1", 0)]
+    #[case::equal_material_blacks_turn(
+        PRIME_MATERIAL_VALUES, "k7/1qrbnpp1/8/8/8/8/1QRBNPP1/K7 b - - 0 1", 0)]
+    #[case::pawn_advantage_active_player(
+        MaterialValues {
+            pawn_value: 5,
+            ..ZERO_MATERIAL_VALUES
+        },
+        "8/8/6P1/5PKP/8/8/1kp5/8 w - - 0 1",
+        10
+    )]
+    #[case::pawn_advantage_opponent(
+        MaterialValues {
+            pawn_value: 5,
+            ..ZERO_MATERIAL_VALUES
+        },
+        "8/8/6P1/5PKP/8/8/1kp5/8 b - - 0 1",
+        -10
+    )]
+    #[case::knight_advantage_active_player(
+        MaterialValues {
+            knight_value: 7,
+            ..ZERO_MATERIAL_VALUES
+        },
+        "6k1/5ppp/5n2/8/pN2n3/P7/1P3PPP/4R1K1 b - - 0 1",
+        7
+    )]
+    #[case::knight_advantage_opponent(
+        MaterialValues {
+            knight_value: 7,
+            ..ZERO_MATERIAL_VALUES
+        },
+        "6k1/5ppp/5n2/8/pN2n3/P7/1P3PPP/4R1K1 w - - 0 1",
+        -7
+    )]
+    #[case::bishop_advantage_active_player(
+        MaterialValues {
+            bishop_value: 9,
+            ..ZERO_MATERIAL_VALUES
+        },
+        "4r2p/4nkp1/8/8/7B/7P/5PPB/6K1 w - - 0 1",
+        18
+    )]
+    #[case::bishop_advantage_opponent(
+        MaterialValues {
+            bishop_value: 9,
+            ..ZERO_MATERIAL_VALUES
+        },
+        "4r2p/4nkp1/8/8/7B/7P/5PPB/6K1 b - - 0 1",
+        -18
+    )]
+    #[case::rook_advantage_active_player(
+        MaterialValues {
+            rook_value: 10,
+            ..ZERO_MATERIAL_VALUES
+        },
+        "4r1k1/pp2rpp1/2n2b1p/8/8/2P1QN2/PP3PPP/4R1K1 b - - 0 1",
+        10
+    )]
+    #[case::rook_advantage_opponent(
+        MaterialValues {
+            rook_value: 10,
+            ..ZERO_MATERIAL_VALUES
+        },
+        "4r1k1/pp2rpp1/2n2b1p/8/8/2P1QN2/PP3PPP/4R1K1 w - - 0 1",
+        -10
+    )]
+    #[case::queen_advantage_active_player(
+        MaterialValues {
+            queen_value: 15,
+            ..ZERO_MATERIAL_VALUES
+        },
+        "2q5/1q4k1/8/6P1/8/8/8/K7 b - - 0 1",
+        30
+    )]
+    #[case::queen_advantage_opponent(
+        MaterialValues {
+            queen_value: 15,
+            ..ZERO_MATERIAL_VALUES
+        },
+        "2q5/1q4k1/8/6P1/8/8/8/K7 w - - 0 1",
+        -30
+    )]
+    #[case::multiple_piece_kinds_combined_properly(
+        MaterialValues {
+            pawn_value: 5,
+            bishop_value: 7,
+            ..ZERO_MATERIAL_VALUES
+        },
+        "6k1/6pp/5bb1/8/8/4B2P/5PP1/6K1 w - - 0 1",
+        -2
+    )]
+    fn base_evaluator_evaluates_material_correctly(#[case] material_values: MaterialValues,
+            #[case] fen: &str, #[case] expected_value: Centipawns) {
+        let mut base_evaluator = ZERO_KVARKO_BASE_EVALUATOR;
+        base_evaluator.values[Piece::Pawn as usize] = material_values.pawn_value;
+        base_evaluator.values[Piece::Knight as usize] = material_values.knight_value;
+        base_evaluator.values[Piece::Bishop as usize] = material_values.bishop_value;
+        base_evaluator.values[Piece::Rook as usize] = material_values.rook_value;
+        base_evaluator.values[Piece::Queen as usize] = material_values.queen_value;
+
+        assert_fen_evaluates_to(base_evaluator, fen, expected_value);
+    }
+
+    #[rstest]
+    #[case::equal_moves_white(
+        "r1bqk2r/ppp2pp1/2np1n1p/2b1p3/2B1P3/2NP1N1P/PPP2PP1/R1BQK2R w KQkq - 0 7", 0)]
+    #[case::equal_moves_black(
+        "r1bqk2r/ppp2pp1/2np1n1p/2b1p3/2B1P3/2NP1N1P/PPP2PP1/R1BQK2R b KQkq - 0 7", 0)]
+    #[case::active_player_has_more_moves(
+        "2r3k1/pp3pp1/2r1p2p/3pP2b/2pPn3/2Pq4/PP3PPP/RNQ1BRK1 b - - 0 1", 47 - 21)]
+    #[case::opponent_has_more_moves(
+        "2r3k1/pp3pp1/2r1p2p/3pP2b/2pPn3/2Pq4/PP3PPP/RNQ1BRK1 w - - 0 1", 21 - 47)]
+    #[case::castling_gives_active_player_advantage(
+        "r1bqk2r/ppp2pp1/2np1n1p/2b1p3/2B1P3/2NP1N1P/PPP2PP1/R1BQK2R w KQ - 0 7", 1)]
+    #[case::castling_gives_opponent_advantage(
+        "r1bqk2r/ppp2pp1/2np1n1p/2b1p3/2B1P3/2NP1N1P/PPP2PP1/R1BQK2R w kq - 0 7", -1)]
+    #[case::en_passant_makes_difference("k7/8/8/8/1pP5/8/8/K7 b - c3 0 1", 1)]
+    fn base_evaluator_evaluates_mobility_correctly(
+            #[case] fen: &str, #[case] expected_value: Centipawns) {
+        let base_evaluator = KvarkoBaseEvaluator {
+            move_value: 1,
+            ..ZERO_KVARKO_BASE_EVALUATOR
+        };
+
+        assert_fen_evaluates_to(base_evaluator, fen, expected_value);
+    }
+
+    /// Tests assume following values (primes to avoid cancellation):
+    /// Doubled Pawns: -23 Centipawns
+    /// Pawn on Rank 6: 29 Centipawns
+    /// Pawn on Rank 7: 31 Centipawns
+    #[rstest]
+    #[case::equal_pawn_structure_white("6k1/pp3ppp/4p3/3pP3/2pP4/2P4P/PP3PP1/6K1 w - - 0 1", 0)]
+    #[case::equal_pawn_structure_black("6k1/pp3ppp/4p3/3pP3/2pP4/2P4P/PP3PP1/6K1 b - - 0 1", 0)]
+    #[case::doubled_pawns_for_active_player(
+        "6k1/pp3pp1/4p1p1/3pP3/2pP4/2P4P/PP3PP1/6K1 b - - 0 1", -23)]
+    #[case::doubled_pawns_for_opponent(
+        "6k1/pp3pp1/4p1p1/3pP3/2pP4/2P4P/PP3PP1/6K1 w - - 0 1", 23)]
+    #[case::pawn_on_sixth_rank_for_active_player(
+        "6k1/pp3pp1/4p2p/4P3/3P4/1Pp4P/P4PP1/6K1 b - - 0 1", 29)]
+    #[case::pawn_on_sixth_rank_for_opponent(
+        "6k1/pp3pp1/4p2p/4P3/3P4/1Pp4P/P4PP1/6K1 w - - 0 1", -29)]
+    #[case::pawn_on_seventh_rank_for_active_player(
+        "6k1/P4pp1/4p2p/1p1pP3/2pP4/2P4P/5PP1/6K1 w - - 0 1", 31)]
+    #[case::pawn_on_seventh_rank_for_opponent(
+        "6k1/P4pp1/4p2p/1p1pP3/2pP4/2P4P/5PP1/6K1 b - - 0 1", -31)]
+    #[case::tripled_pawns_for_active_player("4k3/1pp3pp/p7/8/4P3/4P3/4P1PP/4K3 w - - 0 1", -46)]
+    #[case::tripled_pawns_for_opponent("4k3/1pp3pp/p7/8/4P3/4P3/4P1PP/4K3 b - - 0 1", 46)]
+    #[case::complex_pawn_structure(
+        "4k3/4p1p1/4p1p1/4P3/3P4/2p4P/Pp3PP1/4K3 w - - 0 1", 23 * 2 - 29 - 31)]
+    fn base_evaluator_evaluates_pawn_structure_correctly(
+            #[case] fen: &str, #[case] expected_value: Centipawns) {
+        let base_evaluator = KvarkoBaseEvaluator {
+            doubled_pawn_penalty: 23,
+            pawn_sixth_rank_value: 29,
+            pawn_seventh_rank_value: 31,
+            ..ZERO_KVARKO_BASE_EVALUATOR
+        };
+
+        assert_fen_evaluates_to(base_evaluator, fen, expected_value);
+    }
+    
+    #[rstest]
+    #[case::no_pair_vs_no_pair("6k1/5pp1/7p/8/8/7P/5PP1/6K1 w - - 0 1", 0)]
+    #[case::pair_vs_pair("4bbk1/5pp1/7p/8/8/7P/5PP1/4BBK1 b - - 0 1", 0)]
+    #[case::pair_vs_no_pair("6k1/5pp1/7p/8/8/7P/5PP1/4BBK1 w - - 0 1", 1)]
+    #[case::no_pair_vs_pair("6k1/5pp1/7p/8/8/7P/5PP1/4BBK1 b - - 0 1", -1)]
+    #[case::two_pair_vs_no_pair("2bbbbk1/5pp1/7p/8/8/7P/5PP1/6K1 b - - 0 1", 2)]
+    fn base_evaluator_evaluates_bishop_pair_correctly(
+            #[case] fen: &str, #[case] expected_value: Centipawns) {
+        let base_evaluator = KvarkoBaseEvaluator {
+            bishop_pair_value: 1,
+            ..ZERO_KVARKO_BASE_EVALUATOR
+        };
+
+        assert_fen_evaluates_to(base_evaluator, fen, expected_value);
+    }
+
+    fn assert_fen_evaluates_to(
+            mut base_evaluator: KvarkoBaseEvaluator, fen: &str, expected_value: Centipawns) {
+        let mut state = State::<ZobristHasher<u64>>::from_fen(fen).unwrap();
+
+        let eval = base_evaluator.evaluate_state(
+            &mut state, Evaluation::NEG_INFINITY, Evaluation::INFINITY);
+
+        assert_that!(eval).is_equal_to(Evaluation::from_centipawns(expected_value).unwrap());
     }
 }
