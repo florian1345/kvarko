@@ -116,3 +116,27 @@ pub const PIECES: [Piece; PIECE_COUNT] = [
     Piece::Queen,
     Piece::King
 ];
+
+#[cfg(test)]
+mod tests {
+    
+    use super::*;
+    use kernal::prelude::*;
+    use rstest::rstest;
+    
+    #[rstest]
+    #[case(Piece::Pawn)]
+    #[case(Piece::Knight)]
+    #[case(Piece::King)]
+    fn is_slider_is_false_for_non_sliders(#[case] piece: Piece) {
+        assert_that!(piece.is_slider()).is_false();
+    }
+    
+    #[rstest]
+    #[case(Piece::Bishop)]
+    #[case(Piece::Rook)]
+    #[case(Piece::Queen)]
+    fn is_slider_is_true_for_sliders(#[case] piece: Piece) {
+        assert_that!(piece.is_slider()).is_true();
+    }
+}

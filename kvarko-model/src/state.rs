@@ -1660,6 +1660,42 @@ mod tests {
     }
 
     #[test]
+    fn stalemate() {
+        // Board (white to move):
+        // ┌───┬───┬───┬───┬───┬───┬───┬───┐
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │ b │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ n │   │   │ p │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │   │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │   │   │ k │   │   │
+        // ├───┼───┼───┼───┼───┼───┼───┼───┤
+        // │   │   │   │ K │   │   │   │   │
+        // └───┴───┴───┴───┴───┴───┴───┴───┘
+        //
+        // After Bg5, White has no legal moves, constituting a draw by
+        // stalemate.
+
+        let fen = "8/8/5b2/8/3n2P1/8/5k2/3K4 b - - 0 1";
+        let mov = Move::Ordinary {
+            moved: Piece::Bishop,
+            captured: None,
+            delta_mask: Bitboard::of([F6, G5])
+        };
+
+        test_move(fen, mov, |state| {
+            assert_eq!(Some(Outcome::Draw), state.compute_outcome());
+        })
+    }
+
+    #[test]
     fn threefold_repetition() {
         // Board (black to move):
         // ┌───┬───┬───┬───┬───┬───┬───┬───┐
